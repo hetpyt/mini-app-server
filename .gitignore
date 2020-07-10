@@ -1,0 +1,11 @@
+# Logs
+logs
+*.log
+
+# Dependency directories
+/vendor
+
+# Optional npm cache directory
+/.vscode
+.vscode
+.idea

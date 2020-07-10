@@ -1,0 +1,114 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "868fe391cf0ec0bcbfcfa3334f38f2b0",
+    "packages": [
+        {
+            "name": "jacwright/restserver",
+            "version": "dev-master",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/jacwright/RestServer.git",
+                "reference": "89f3cf5db468bcf49609a81631e63a3e413b227e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/jacwright/RestServer/zipball/89f3cf5db468bcf49609a81631e63a3e413b227e",
+                "reference": "89f3cf5db468bcf49609a81631e63a3e413b227e",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=5.3.3"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-0": {
+                    "Jacwright\\RestServer": "source/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Jacob Wright",
+                    "email": "jacwright@gmail.com",
+                    "homepage": "http://jacwright.com",
+                    "role": "Developer"
+                }
+            ],
+            "description": "php rest server for very light-weight REST APIs",
+            "homepage": "https://github.com/jacwright/RestServer",
+            "keywords": [
+                "http",
+                "json",
+                "light-weight",
+                "mit",
+                "php",
+                "rest",
+                "rest-server"
+            ],
+            "time": "2017-11-26T23:16:09+00:00"
+        },
+        {
+            "name": "krugozor/database",
+            "version": "v1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/Vasiliy-Makogon/Database.git",
+                "reference": "5081f3758d62508741bc2f8531c8d6433a11434c"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/Vasiliy-Makogon/Database/zipball/5081f3758d62508741bc2f8531c8d6433a11434c",
+                "reference": "5081f3758d62508741bc2f8531c8d6433a11434c",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=5.3.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Krugozor\\Database\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "authors": [
+                {
+                    "name": "Vasiliy Makogon",
+                    "email": "makogon-vs@yandex.ru"
+                }
+            ],
+            "keywords": [
+                "database",
+                "mysql",
+                "mysqli",
+                "placeholder",
+                "placeholders",
+                "prepare statement"
+            ],
+            "time": "2017-12-19T19:05:12+00:00"
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {
+        "jacwright/restserver": 20
+    },
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": ">=5.3.3"
+    },
+    "platform-dev": [],
+    "plugin-api-version": "1.1.0"
+}
