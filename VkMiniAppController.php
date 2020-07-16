@@ -8,32 +8,110 @@ class VkMiniAppController {
     /**
     * @url GET /
     */
-    public function test()
-    {
-        //global $_Config;
-        //return $_Config;
+    public function test() {
+        throw new RestException(404, 'Service unavaulable!');
     }
 
     /**
     * @noAuth
-    * @url GET /getclient/$code/$passphrase
+    * @url POST /registrationrequest
     */
-    public function getclient($code, $passphrase)
-    {
-        $meter_columns = ['meter_id', 'title', 'current_count', 'updated', 'new_count', 'recieve_date', 'vk_user_id'];
-        global $_Config;
+    public function registration_request($data) {
+        $check_fields = ['vk_user_id', 'acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
 
         try {
-            $db = VkMiniAppController::db_open($_Config);
+            if (!property_exists($data, 'result')) throw new Exception('bad request syntax');
+            if (!$data->result) throw new Exception('result not true');
+            // данные по показаниям
+            if (!property_exists($data, 'registration_data')) throw new Exception('no registration data exists');
+            $reg_data = $data->registration_data;
+
+            foreach ($check_fields as $field) {
+                if (!property_exists($reg_data, $field)) throw new Exception('bad registration data');
+            }
+
+            $rows_inserted = 0;
+
+            $db = $this->db_open();
+            
+            $db->query("INSERT INTO `registration_requests` (`vk_user_id`, `acc_id`, `surname`, `first_name`, `patronymic`, `street`, `n_dom`, `n_kv`)
+                VALUES (?i, '?s', '?s', '?s', '?s', '?s', '?s', ?i);", 
+                $reg_data->vk_user_id,
+                $reg_data->acc_id,
+                $reg_data->surname,
+                $reg_data->first_name,
+                $reg_data->patronymic,
+                $reg_data->street,
+                $reg_data->n_dom,
+                $reg_data->n_kv
+            );
+
+        } catch(Exception $e) {
+            return $this->return_result($e->getMessage(), false);
+        }
+
+        return $this->return_result(null, true);
+    }
+    /**
+    * @noAuth
+    * @url GET /getuser/$id
+    */
+    public function getuser($id) {
+        $client_columns = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr'];
+        try {
+            $db = $this->db_open();
+
+            // secret_code должне быть уникальным
+            $result = $db->query(
+            "SELECT 
+                `vk_users`.`is_blocked`,
+                `vk_users`.`privileges`,
+                `vk_users`.`registered_by`,
+                `vk_users`.`registration_date`,
+                `clients`.`acc_id`, 
+                `clients`.`secret_code`, 
+                `clients`.`acc_id_repr`, 
+                `clients`.`tenant_repr`, 
+                `clients`.`address_repr`
+            FROM `vk_users` 
+            LEFT JOIN `accounts` ON `accounts`.`vk_user_id` = `vk_users`.`vk_user_id`
+            LEFT JOIN `clients` ON `clients`.`acc_id` = `accounts`.`acc_id`
+            WHERE `vk_users`.`vk_user_id` = ?i;", 
+            $id);
+
+            $data = null;
+
+            if ($result->getNumRows() != 0) {
+                $data = $this->expand_db_result($result, $client_columns, 'accounts');
+                // проверка на блок пользователя
+                if ((int)$data['is_blocked'] !== 0) {
+                    // не разрешаем передавать показания и выполнять какие либо действия
+                    $data['accounts'] = [];
+                    // сброс полномочий, если они есть
+                    $data['privileges'] = 'USER';
+                }
+                $data = [$data];
+            }
+            
+            return $this->return_result($data);
+
+        } catch (Exception $e) {
+            //print_r($e);
+            throw new RestException(404, 'Service unavaulable!');
+        }
+    }
+    
+    /**
+    * @noAuth
+    * @url GET /getmeters/$acc_id
+    */
+    public function getmeters($acc_id) {
+        try {
+            $db = $this->db_open();
 
             // secret_code должне быть уникальным
             $result = $db->query(
             "SELECT
-                `clients`.`id` as 'client_id',
-                `clients`.`nomer_ls`,
-                `clients`.`familiya`,
-                `clients`.`imya`,
-                `clients`.`otchestvo`,
                 `meters`.`id` as 'meter_id',
                 `meters`.`title`,
                 `meters`.`current_count`,
@@ -41,9 +119,7 @@ class VkMiniAppController {
                 `lastIndications`.`count` as 'new_count',
                 `lastIndications`.`recieve_date`,
                 `lastIndications`.`vk_user_id`
-            FROM `clients`
-            LEFT JOIN `meters` 
-            ON `meters`.`client_id` = `clients`.`id` 
+            FROM `meters` 
             LEFT JOIN (
                 SELECT `indications`.*
                 FROM `indications` 
@@ -55,65 +131,46 @@ class VkMiniAppController {
                     ON `indications`.`id` = `maxIndacations`.`maxId`
                 ) lastIndications
             ON `meters`.`id` = `lastIndications`.`meter_id`
-            WHERE `clients`.`secret_code` = '?s';", $code);
+            WHERE `meters`.`acc_id` = '?i';", $acc_id);
 
-            $ret_data = ['data' => null];
-            if ($result->getNumRows() == 0) {
-                // нет совпадений
-                $ret_data['result'] = false;
-            } else {
-                $ret_data['result'] = true;
-                $ret_data['data'] = ['meters' => []];
-                while ($row = $result->fetch_assoc()) {
-                    $meter = [];
-                    foreach($row as $field => $value) {
-                        if (in_array($field, $meter_columns, true)) {
-                            $meter[$field] = $value;
-                        } else {
-                            $ret_data['data'][$field] = $value;
-                        }
-                    }
-                    array_push($ret_data['data']['meters'], $meter);
-                }    
-            }
-            //$result->free();
-            //sleep(3);
-            return $ret_data;
+            $data = null;
+            if ($result->getNumRows() != 0) {
+                $meters = $result->fetch_assoc_array();
+                $data = ['acc_id' => $acc_id];
+                $data['meters'] = $meters;
+                $data = [$data];
+            }    
+
+            return $this->return_result($data);
 
         } catch (Exception $e) {
-            //print_r($e);
+            print_r($e);
             throw new RestException(404, 'Service unavaulable!');
         }
     } 
 
     /**
     * @noAuth
-    * @url POST /setmeters/$code/$passphrase
+    * @url POST /setmeters
     */
-    public function setmeters($code, $passphrase, $data)
-    {
-        global $_Config;
+    public function setmeters($data) {
         $meters = null;
-        $ret_result = ['result' => false];
-
         // проверки
         try {
-            if (!$data->result) {
-                throw Exception('result not true');
-            }
+            if (!property_exists($data, 'result')) throw new Exception('bad request syntax');
+            if (!$data->result) throw new Exception('result not true');
             // данные по показаниям
+            if (!property_exists($data, 'meters')) throw new Exception('no meters data exists');
             $meters = $data->meters;
+            if (!is_array($meters)) throw new Exception('bad meters data');
 
-        } catch (Exception $e) {
-            $ret_result['message'] = $e->getMessage();
-            return $ret_result;
-        }
+            $rows_inserted = 0;
 
-        try {
+            $db = $this->db_open();
 
-            $db = VkMiniAppController::db_open($_Config);
-
-            $query = '';
+            $query = "INSERT 
+            INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
+            VALUES ";
             foreach($meters as $meter) {
                 // жесткие проверки
                 if (!is_numeric($meter->vk_user_id)) throw Exception('bad vk user');
@@ -125,37 +182,65 @@ class VkMiniAppController {
                 }
                 // проверка показаний
                 if (!is_numeric($meter->new_count)) throw Exception('bad new count');
-
-                $result = $db->query("
-                    INSERT 
-                    INTO `indications` (`meter_id`, `count`, `vk_user_id`, `vk_user_familiya`, `vk_user_imya`) 
-                    VALUES (?i, ?i, ?i, '?s', '?s');\n", 
-                    $meter->meter_id,
-                    $meter->new_count, 
-                    $meter->vk_user_id, 
-                    $meter->vk_user_familiya, 
-                    $meter->vk_user_imya, 
-                );
-
+                $query .= ($rows_inserted ? ',' : '').$db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $meter->vk_user_id);
+                $rows_inserted++;
             }
+            //throw new Exception($query);
+            if ($rows_inserted) $result = $db->query($query);
+
         } catch(Exception $e) {
-            $ret_result['message'] = $e->getMessage();
-            return $ret_result;
+            return $this->return_result($e->getMessage(), false);
         }
 
-        $ret_result['result'] = true;
-        return $ret_result;
-}
+        return $this->return_result(null, true);
+    }
 
-    private function db_open($config) {
+    private function expand_db_result($db_result, $unique_fields, $unique_list_name = 'items', $no_null_rows = true) {
+        $data = [];
+        $data[$unique_list_name] = [];
+        while ($row = $db_result->fetch_assoc()) {
+            $unique_row = [];
+            $is_null_row = true;
+            foreach($row as $field => $value) {
+                if (in_array($field, $unique_fields, true)) {
+                    $unique_row[$field] = $value;
+                    $is_null_row = $is_null_row && ($value === null);
+                } else {
+                    $data[$field] = $value;
+                }
+            }
+            if (!$is_null_row)
+                array_push($data[$unique_list_name], $unique_row);
+        }
+        return $data;
+    }
+
+    private function return_result($data, $result = true) {
+        $ret_data = [
+            'result' => $result,
+            'data' => [],
+            'data_len' => 0
+        ];
+        if ($data !== null) {
+            if (is_array($data)) 
+                $ret_data['data'] = $data;
+            else
+                array_push($ret_data['data'], $data);
+        }
+        $ret_data['data_len'] = count($ret_data['data']);
+        return  $ret_data;
+    }
+
+    private function db_open() {
+        global $_Config;
         $db = Mysql::create(
-            $config['db_host'],
-            $config['db_user'],
-            $config['db_pass'],
-            ($config['db_port'] ? $config['db_port'] : null)
+            $_Config['db_host'],
+            $_Config['db_user'],
+            $_Config['db_pass'],
+            ($_Config['db_port'] ? $_Config['db_port'] : null)
         )
-        ->setDatabaseName($config['db_name'])
-        ->setCharset($config['db_charset']);
+        ->setDatabaseName($_Config['db_name'])
+        ->setCharset($_Config['db_charset']);
 
         return $db;
     }

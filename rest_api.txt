@@ -1,0 +1,34 @@
+POST
+http://localhost/api/registrationrequest
+{
+  "result" : true,
+  "registration_data" : 
+  	{
+      "vk_user_id": 555444,
+      "acc_id" : "565444",
+      "surname" : "Сидоров", 
+      "first_name" : "Сидор",
+      "patronymic" : "Сидорович",
+      "street" : "Лесная",
+      "n_dom": "35",
+      "n_kv": 1
+    }
+}
+
+POST
+http://localhost/api/setmeters
+{
+  "result" : true,
+  "meters" : [
+  	{
+  	"meter_id" : 10,
+    "new_count" : 120,
+    "vk_user_id" : 123
+    },
+    {
+  	"meter_id" : 11,
+    "new_count" : 130,
+    "vk_user_id" : 145
+    }
+  ]
+}

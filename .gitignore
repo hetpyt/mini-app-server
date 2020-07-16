@@ -2,6 +2,9 @@
 logs
 *.log
 
+# config
+/config/config.php
+
 # Dependency directories
 /vendor
 
