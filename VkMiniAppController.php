@@ -14,11 +14,88 @@ class VkMiniAppController {
 
     /**
     * @noAuth
+    * @url GET /registrationstatus/$id
+    */
+    public function registration_status($id) {
+        try {
+            $db = $this->db_open();
+
+            $result = $db->query(
+            "SELECT
+                `id`,
+                `request_date`,
+                `is_approved`,
+                `acc_id`
+            FROM `registration_requests` 
+            WHERE `vk_user_id` = ?i AND `hide_in_app` = 0 AND 'del_in_app' = 0;", 
+            $id);
+
+            $data = null;
+
+            if ($result->getNumRows() != 0) {
+                $data = $result->fetch_assoc_array();
+                //$data = [$data];
+            }
+            sleep(1);
+            return $this->return_result($data);
+
+        } catch (Exception $e) {
+            //print_r($e);
+            //throw new RestException(404, 'Service unavaulable!');
+            return $this->return_result($data, false);
+        }
+
+    }
+
+    /**
+    * @noAuth
+    * @url POST /registrationrequestaction
+    */
+    public function registration_request_action($data) {
+        $check_fields = ['result', 'vk_user_id', 'request_id', 'action'];
+        $check_int_fields = ['vk_user_id', 'request_id'];
+        try {
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+            //print_r($data->action);
+            if (!$data->result) throw new Exception('result not true');
+
+            $db = $this->db_open();
+            $set_clause = 'SET ';
+            $num_fields = 0;
+            switch ($data->action) {
+                case 'delete':
+                    $set_clause .= ($num_fields ? ', ' : '')."`del_in_app` = 1";
+                    $num_fields ++;
+
+                case 'hide':
+                    $set_clause .= ($num_fields ? ', ' : '')."`hide_in_app` = 1";
+                    $num_fields ++;
+                    break;
+            };
+
+            if ($num_fields) {
+                $result = $db->query(
+                    "UPDATE `registration_requests` ".$set_clause." WHERE `registration_requests`.`id` = ?i AND `registration_requests`.`vk_user_id` = ?i", 
+                    $data->request_id,
+                    $data->vk_user_id);
+
+                //print_r($db->getQueryString());
+            }
+        } catch (Exception $e) {
+            return $this->return_result($e->getMessage(), false);
+        }
+
+        sleep(1);
+        return $this->return_result(null, true);
+    }
+
+    /**
+    * @noAuth
     * @url POST /registrationrequest
     */
     public function registration_request($data) {
         $check_fields = ['vk_user_id', 'acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
-
+        $check_int_fields = ['vk_user_id', 'n_kv'];
         try {
             if (!property_exists($data, 'result')) throw new Exception('bad request syntax');
             if (!$data->result) throw new Exception('result not true');
@@ -28,7 +105,10 @@ class VkMiniAppController {
 
             foreach ($check_fields as $field) {
                 if (!property_exists($reg_data, $field)) throw new Exception('bad registration data');
+                if (in_array($field, $check_int_fields) && !is_numeric($reg_data->{$field})) $reg_data->{$field} = 0;
             }
+            if (0 == $reg_data->vk_user_id) throw new Exception('bad vk user');
+
 
             $rows_inserted = 0;
 
@@ -91,13 +171,17 @@ class VkMiniAppController {
                     $data['privileges'] = 'USER';
                 }
                 $data = [$data];
+            } else {
+                // проверим нет ли заявки на регистрацию
+
             }
             
             return $this->return_result($data);
 
         } catch (Exception $e) {
             //print_r($e);
-            throw new RestException(404, 'Service unavaulable!');
+            //throw new RestException(404, 'Service unavaulable!');
+            return $this->return_result($e->getMessage(), false);
         }
     }
     
@@ -141,11 +225,13 @@ class VkMiniAppController {
                 $data = [$data];
             }    
 
+            sleep(1);
             return $this->return_result($data);
 
         } catch (Exception $e) {
-            print_r($e);
-            throw new RestException(404, 'Service unavaulable!');
+            //print_r($e);
+            //throw new RestException(404, 'Service unavaulable!');
+            return $this->return_result(null, false);
         }
     } 
 
@@ -154,45 +240,98 @@ class VkMiniAppController {
     * @url POST /setmeters
     */
     public function setmeters($data) {
-        $meters = null;
-        // проверки
         try {
-            if (!property_exists($data, 'result')) throw new Exception('bad request syntax');
+            //echo('data='); print_r($data); echo("\n");
+            $check_fields = ['result', 'vk_user_id', 'meters'];
+            $check_int_fields = ['vk_user_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, true);
+
             if (!$data->result) throw new Exception('result not true');
+
+            //check user
+            if (!$this->_check_user_privileges($data->vk_user_id, 'user')) {
+                throw new Exception('not priveleged user');
+            }
             // данные по показаниям
-            if (!property_exists($data, 'meters')) throw new Exception('no meters data exists');
             $meters = $data->meters;
             if (!is_array($meters)) throw new Exception('bad meters data');
 
-            $rows_inserted = 0;
+            if (count($meters) > 0) {
+                $check_fields = ['meter_id', 'new_count'];
+                $check_int_fields = ['meter_id', 'new_count'];
+        
+                $this->_check_fields($meters, $check_fields, $check_int_fields, true);
 
-            $db = $this->db_open();
+                $rows_inserted = 0;
 
-            $query = "INSERT 
-            INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
-            VALUES ";
-            foreach($meters as $meter) {
-                // жесткие проверки
-                if (!is_numeric($meter->vk_user_id)) throw Exception('bad vk user');
-                if (!is_numeric($meter->meter_id)) throw Exception('bad meter id');
-                // нежесткие проверки
-                // пользователь передал пустую строку (считаем что не передал)
-                if ("" === $meter->new_count) {
-                    continue;
+                $db = $this->db_open();
+
+                $query = "INSERT 
+                INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
+                VALUES ";
+                foreach($meters as $meter) {
+                    $query .= ($rows_inserted ? ',' : '').$db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $data->vk_user_id);
+                    $rows_inserted++;
                 }
-                // проверка показаний
-                if (!is_numeric($meter->new_count)) throw Exception('bad new count');
-                $query .= ($rows_inserted ? ',' : '').$db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $meter->vk_user_id);
-                $rows_inserted++;
+                //throw new Exception($query);
+                if ($rows_inserted) $result = $db->query($query);
             }
-            //throw new Exception($query);
-            if ($rows_inserted) $result = $db->query($query);
-
         } catch(Exception $e) {
             return $this->return_result($e->getMessage(), false);
         }
-
+        sleep(1);
         return $this->return_result(null, true);
+    }
+
+    private function _check_user_privileges($user_id, $requested_privilege) {
+        try {
+            $priv_clause = '';
+            $requested_privilege = strtoupper($requested_privilege);
+            switch ($requested_privilege) {
+                case 'USER':
+                    $priv_clause .= (strlen($priv_clause) ? ',' : '')."'USER'";
+                case 'OPERATOR':
+                    $priv_clause .= (strlen($priv_clause) ? ',' : '')."'OPERATOR'";
+                case 'ADMIN':
+                    $priv_clause .= (strlen($priv_clause) ? ',' : '')."'ADMIN'";
+                    break;
+                default:
+                    return false;
+            }
+            $db = $this->db_open();
+            $result = $db->query("
+                SELECT `vk_user_id` 
+                FROM `vk_users` 
+                WHERE `vk_user_id` = ?i AND `is_blocked` = 0 AND `privileges` IN (".$priv_clause.");",
+            $user_id);
+            //print_r($db->getQueryString()); echo("\n");
+
+            return ($result->getNumRows() != 0 );
+
+        } catch (Exception $e) {
+            //print_r($e->getMessage());
+            return false;
+        }
+    }
+
+    private function _check_fields(&$data, $fields, $int_fields, $set_zero = true) {
+        if (is_array($data)) {
+            foreach ($data as $dataItem) {
+                $this->_check_fields($dataItem, $fields, $int_fields, $set_zero);
+            }
+
+        } else if (is_object($data)) {
+            foreach ($fields as $field) {
+                if (!property_exists($data, $field)) throw new Exception("field '$field' not exists");
+                if (in_array($field, $int_fields) && !is_numeric($data->{$field})) {
+                    if ($set_zero) $data->{$field} = 0;
+                    else throw new Exception("not int value in field '$field'");
+                }
+            }
+
+        } else {
+            throw new Exception("data must been array or object");
+        }
     }
 
     private function expand_db_result($db_result, $unique_fields, $unique_list_name = 'items', $no_null_rows = true) {
