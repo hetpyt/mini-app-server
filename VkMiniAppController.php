@@ -8,16 +8,31 @@ class VkMiniAppController {
     /**
     * @url GET /
     */
-    public function test() {
+    public function root() {
         throw new RestException(404, 'Service unavaulable!');
     }
 
     /**
-    * @noAuth
-    * @url GET /registrationstatus/$id
+    * @url GET /test
     */
-    public function registration_status($id) {
+    public function test() {
+        print_r($this->_get_table_info('registration_requests'));
+    }
+
+    /**
+    * @url POST /echo
+    */
+    public function post_echo($data) {
+        print_r($data);
+    }
+
+    /**
+    * @noAuth
+    * @url GET /registrationstatus/$user_id
+    */
+    public function registration_status($user_id) {
         try {
+            $data = null;
             $db = $this->db_open();
 
             $result = $db->query(
@@ -28,13 +43,10 @@ class VkMiniAppController {
                 `acc_id`
             FROM `registration_requests` 
             WHERE `vk_user_id` = ?i AND `hide_in_app` = 0 AND 'del_in_app' = 0;", 
-            $id);
-
-            $data = null;
+            $user_id);
 
             if ($result->getNumRows() != 0) {
                 $data = $result->fetch_assoc_array();
-                //$data = [$data];
             }
             sleep(1);
             return $this->return_result($data);
@@ -43,8 +55,51 @@ class VkMiniAppController {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
             return $this->return_result($data, false);
-        }
 
+        }
+    }
+
+    /**
+    * @noAuth
+    * @url POST /adminprocessregistrationrequests
+    */
+    public function admin_process_registration_requests($data) {
+        try {
+            $check_fields = ['result', 'vk_user_id', 'action', 'filters'];
+            $check_int_fields = ['vk_user_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+
+            if (!$this->_check_user_privileges($data->vk_user_id, 'OPERATOR'))  throw new Exception('not priveleged user');
+
+            $action = strtoupper($data->action);
+            $res_data = null;
+
+            switch ($action) {
+                case "GETALL":
+                    //print_r('getall');
+                    $res_data = $this->_get_registration_requests($data->filters);
+                    break;
+
+                case "APPROVE":
+                    $query = "UPDATE `registration_requests`
+                    SET `is_approved` = 1, `processed_by` = ?i ";
+                    break;
+
+                case "REJECT":
+                    $res_data = $this->_reject_registration_request($data->filters, $data->vk_user_id);
+                    break;
+
+                default:
+                    throw new Exception('unknown action');
+            }
+
+            return $this->return_result($res_data);
+
+        } catch (Exception $e) {
+            //print_r($e->getMessage());
+            //throw new RestException(404, 'Service unavaulable!');
+            return $this->return_result($e->getMessage(), false);
+        }
     }
 
     /**
@@ -80,13 +135,15 @@ class VkMiniAppController {
                     $data->vk_user_id);
 
                 //print_r($db->getQueryString());
+                sleep(1);
+                return $this->return_result(null, true);
             }
+
         } catch (Exception $e) {
             return $this->return_result($e->getMessage(), false);
+
         }
 
-        sleep(1);
-        return $this->return_result(null, true);
     }
 
     /**
@@ -94,28 +151,26 @@ class VkMiniAppController {
     * @url POST /registrationrequest
     */
     public function registration_request($data) {
-        $check_fields = ['vk_user_id', 'acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
-        $check_int_fields = ['vk_user_id', 'n_kv'];
         try {
-            if (!property_exists($data, 'result')) throw new Exception('bad request syntax');
+            $check_fields = ['result', 'registration_data'];
+            $this->_check_fields($data, $check_fields, [], false);
+
             if (!$data->result) throw new Exception('result not true');
             // данные по показаниям
-            if (!property_exists($data, 'registration_data')) throw new Exception('no registration data exists');
             $reg_data = $data->registration_data;
 
-            foreach ($check_fields as $field) {
-                if (!property_exists($reg_data, $field)) throw new Exception('bad registration data');
-                if (in_array($field, $check_int_fields) && !is_numeric($reg_data->{$field})) $reg_data->{$field} = 0;
-            }
-            if (0 == $reg_data->vk_user_id) throw new Exception('bad vk user');
+            $check_fields = ['vk_user_id', 'acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
+            $check_int_fields = ['vk_user_id'];
+            $this->_check_fields($reg_data, $check_fields, $check_int_fields, true);
 
+            if (0 === $reg_data->vk_user_id) throw new Exception('bad vk user');
 
             $rows_inserted = 0;
 
             $db = $this->db_open();
             
             $db->query("INSERT INTO `registration_requests` (`vk_user_id`, `acc_id`, `surname`, `first_name`, `patronymic`, `street`, `n_dom`, `n_kv`)
-                VALUES (?i, '?s', '?s', '?s', '?s', '?s', '?s', ?i);", 
+                VALUES (?i, '?s', '?s', '?s', '?s', '?s', '?s', ?s);", 
                 $reg_data->vk_user_id,
                 $reg_data->acc_id,
                 $reg_data->surname,
@@ -123,15 +178,17 @@ class VkMiniAppController {
                 $reg_data->patronymic,
                 $reg_data->street,
                 $reg_data->n_dom,
-                $reg_data->n_kv
+                (string)$reg_data->n_kv
             );
+
+            return $this->return_result(null, true);
 
         } catch(Exception $e) {
             return $this->return_result($e->getMessage(), false);
+            
         }
-
-        return $this->return_result(null, true);
     }
+
     /**
     * @noAuth
     * @url GET /getuser/$id
@@ -139,9 +196,9 @@ class VkMiniAppController {
     public function getuser($id) {
         $client_columns = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr'];
         try {
+            $data = null;
             $db = $this->db_open();
 
-            // secret_code должне быть уникальным
             $result = $db->query(
             "SELECT 
                 `vk_users`.`is_blocked`,
@@ -159,8 +216,6 @@ class VkMiniAppController {
             WHERE `vk_users`.`vk_user_id` = ?i;", 
             $id);
 
-            $data = null;
-
             if ($result->getNumRows() != 0) {
                 $data = $this->expand_db_result($result, $client_columns, 'accounts');
                 // проверка на блок пользователя
@@ -171,9 +226,6 @@ class VkMiniAppController {
                     $data['privileges'] = 'USER';
                 }
                 $data = [$data];
-            } else {
-                // проверим нет ли заявки на регистрацию
-
             }
             
             return $this->return_result($data);
@@ -182,6 +234,7 @@ class VkMiniAppController {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
             return $this->return_result($e->getMessage(), false);
+            
         }
     }
     
@@ -191,9 +244,9 @@ class VkMiniAppController {
     */
     public function getmeters($acc_id) {
         try {
+            $data = null;
             $db = $this->db_open();
 
-            // secret_code должне быть уникальным
             $result = $db->query(
             "SELECT
                 `meters`.`id` as 'meter_id',
@@ -217,12 +270,8 @@ class VkMiniAppController {
             ON `meters`.`id` = `lastIndications`.`meter_id`
             WHERE `meters`.`acc_id` = '?i';", $acc_id);
 
-            $data = null;
             if ($result->getNumRows() != 0) {
-                $meters = $result->fetch_assoc_array();
-                $data = ['acc_id' => $acc_id];
-                $data['meters'] = $meters;
-                $data = [$data];
+                $data = $result->fetch_assoc_array();
             }    
 
             sleep(1);
@@ -232,6 +281,7 @@ class VkMiniAppController {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
             return $this->return_result(null, false);
+            
         }
     } 
 
@@ -275,12 +325,120 @@ class VkMiniAppController {
                 }
                 //throw new Exception($query);
                 if ($rows_inserted) $result = $db->query($query);
+
+                sleep(1);
+                return $this->return_result(null, true);
             }
         } catch(Exception $e) {
             return $this->return_result($e->getMessage(), false);
+            
         }
-        sleep(1);
-        return $this->return_result(null, true);
+    }
+
+    private function _get_table_info($table_name) {
+        try {
+            $db = $this->db_open();
+
+            $result = $db->query("SELECT 
+            `COLUMN_NAME`,
+            `DATA_TYPE`
+            FROM `information_schema`.`COLUMNS`
+            WHERE `TABLE_NAME` = '?s' AND `TABLE_SCHEMA` = DATABASE();",
+            $table_name);
+
+            return $result->fetch_assoc_array();
+
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    private function _bild_filters($filters, $table_fields, &$params) {
+        
+        $where_clause = '';
+        if (is_array($filters)) {
+            foreach ($filters as $filter) {
+                $key = array_search($filter->field, array_column($table_fields, 'COLUMN_NAME'));
+                if ($key === false) throw new Exception('bad field name');
+                $operator = "=";
+                $filler = "?s";
+                if ($filter->value === null) {
+                    $operator = "IS";
+                    $filler = "NULL";
+                }
+                else if (is_array($filter->value)) {
+                    $operator = "IN";
+                    $filler = (strtoupper($table_fields[$key]['DATA_TYPE']) == 'INT' ? "(?ai)" : "(?as)");
+                }
+                else {
+                    $filler = (strtoupper($table_fields[$key]['DATA_TYPE']) == 'INT' ? "?i" : "'?s'");
+                }
+                
+                $where_clause .= (strlen($where_clause) ? ' AND ' : '') . " `" . $filter->field . "` " . $operator . " " . $filler;
+                $params[] = $filter->value;
+            }
+        }
+        return $where_clause;
+    }
+
+    private function _get_registration_requests($filters) {
+        try {
+            $db = $this->db_open();
+
+            $table_fields = $this->_get_table_info('registration_requests');
+            if ($table_fields === false) throw new Exception('can not fetch data schema');
+
+            $params = [];
+            $query = "SELECT * FROM `registration_requests` ";
+            $where_clause = $this->_bild_filters($filters, $table_fields, $params);
+            //print_r($where_clause);
+            $result = $db->queryArguments($query . (strlen($where_clause) ? ' WHERE ' . $where_clause : ''), $params);
+            //print_r($db->getQueryString()); echo("\r");
+            return $result->fetch_assoc_array();
+
+        } catch (Exception $e) {
+            throw new Exception($e->getMessage());
+        }
+    }
+
+    private function _approve_registration_request($filters, $admin_id) {
+        try {
+
+            // выбрать заявки по фильтрам
+            $requests = $this->_get_registration_requests($filters);
+            // создать пользователей
+
+            // заапрувить заявки
+            if (!strlen($where_clause)) throw new Exception('no filters given');
+
+            $result = $db->queryArguments($query . ' WHERE ' . $where_clause, $params);
+            if (!$result) throw new Exception('result of query is false');
+
+        } catch (Exception $e) {
+            throw new Exception($e->getMessage());
+        }
+    }
+
+    private function _reject_registration_request($filters, $admin_id) {
+        try {
+            $db = $this->db_open();
+
+            $table_fields = $this->_get_table_info('registration_requests');
+            if ($table_fields === false) throw new Exception('can not fetch data schema');
+
+            $params = [];
+            $params[] = $admin_id;
+            $query = "UPDATE `registration_requests` SET `is_approved` = 0, `processed_by` = ?i ";
+            $where_clause = $this->_bild_filters($filters, $table_fields, $params);
+
+            if (!strlen($where_clause)) throw new Exception('no filters given');
+
+            $result = $db->queryArguments($query . ' WHERE ' . $where_clause, $params);
+            if (!$result) throw new Exception('result of query is false');
+
+        } catch (Exception $e) {
+            throw new Exception($e->getMessage());
+        }
     }
 
     private function _check_user_privileges($user_id, $requested_privilege) {
@@ -311,6 +469,7 @@ class VkMiniAppController {
         } catch (Exception $e) {
             //print_r($e->getMessage());
             return false;
+            
         }
     }
 
