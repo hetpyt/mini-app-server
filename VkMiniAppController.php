@@ -5,6 +5,8 @@ use Krugozor\Database\Mysql\Mysql;
 
 class VkMiniAppController {
 
+    protected $_db;
+
     /**
     * @url GET /
     */
@@ -40,6 +42,7 @@ class VkMiniAppController {
                 `id`,
                 `request_date`,
                 `is_approved`,
+                `rejection_reason`,
                 `acc_id`
             FROM `registration_requests` 
             WHERE `vk_user_id` = ?i AND `hide_in_app` = 0 AND 'del_in_app' = 0;", 
@@ -73,20 +76,25 @@ class VkMiniAppController {
 
             $action = strtoupper($data->action);
             $res_data = null;
+            $options = null;
+            if (property_exists($data, 'options')) $options = $data->options;
 
             switch ($action) {
                 case "GETALL":
                     //print_r('getall');
-                    $res_data = $this->_get_registration_requests($data->filters);
+                    $res_data = $this->_get_registration_requests($data->filters, $options);
+                    break;
+
+                case "DETAIL":
+                    $res_data = $this->_get_registration_request_detail($data->filters, $options);
                     break;
 
                 case "APPROVE":
-                    $query = "UPDATE `registration_requests`
-                    SET `is_approved` = 1, `processed_by` = ?i ";
+                    $res_data = $this->_approve_registration_request($data->filters, $data->vk_user_id, $options);
                     break;
 
                 case "REJECT":
-                    $res_data = $this->_reject_registration_request($data->filters, $data->vk_user_id);
+                    $res_data = $this->_reject_registration_request($data->filters, $data->vk_user_id, $options);
                     break;
 
                 default:
@@ -308,9 +316,9 @@ class VkMiniAppController {
 
             if (count($meters) > 0) {
                 $check_fields = ['meter_id', 'new_count'];
-                $check_int_fields = ['meter_id', 'new_count'];
+                $check_int_fields = ['meter_id'];
         
-                $this->_check_fields($meters, $check_fields, $check_int_fields, true);
+                $this->_check_fields($meters, $check_fields, $check_int_fields, false);
 
                 $rows_inserted = 0;
 
@@ -320,7 +328,9 @@ class VkMiniAppController {
                 INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
                 VALUES ";
                 foreach($meters as $meter) {
-                    $query .= ($rows_inserted ? ',' : '').$db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $data->vk_user_id);
+                    $query .= ($rows_inserted ? ',' : '').(is_numeric($meter->new_count) 
+                        ? $db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $data->vk_user_id) 
+                        : $db->prepare("(?i, NULL, ?i)", $meter->meter_id, $data->vk_user_id));
                     $rows_inserted++;
                 }
                 //throw new Exception($query);
@@ -381,46 +391,123 @@ class VkMiniAppController {
         return $where_clause;
     }
 
-    private function _get_registration_requests($filters) {
+    private function _get_registration_request_detail($filters, $option = null) {
         try {
+            // выбрать заявки по фильтрам
+            $requests = $this->_get_registration_requests($filters);
+            for ($index = 0; $index < count($requests); $index++) {
+                // подбор лицевых счетов в соответствии с заявкой
+                $account = trim($requests[$index]['acc_id']);
+                $db = $this->db_open();
+                $result = $db->query("SELECT * 
+                    FROM `clients` 
+                    WHERE `acc_id_repr` LIKE '%?S%'",
+                    $account);
+                if (!$result) throw new Exception('result of query is false');
+                $requests[$index]['selected_accounts'] = $result->fetch_assoc_array();
+                //print_r($db->getQueryString());
+            }
+            return $requests;
+        } catch (Exception $e) {
+            throw new Exception('can not fetch request detail', 0, $e);
+        }
+    }
+
+    private function _get_registration_requests($filters, $option = null) {
+        try {
+            $select_clause = '*';
+            if (is_string($option)) {
+                $option = strtoupper($option);
+                switch ($option) {
+                    case 'DETAIL':
+                        $select_clause = '*';
+                        break;
+
+                    case 'LIST':
+                        $select_clause = "
+                            `id`, 
+                            `vk_user_id`, 
+                            `acc_id`, 
+                            `request_date`, 
+                            `update_date`, 
+                            `is_approved`, 
+                            `processed_by`, 
+                            `hide_in_app`, 
+                            `del_in_app`";
+                        break;
+
+                    default:
+                        $select_clause = '*';
+                }
+            }
             $db = $this->db_open();
 
             $table_fields = $this->_get_table_info('registration_requests');
             if ($table_fields === false) throw new Exception('can not fetch data schema');
 
             $params = [];
-            $query = "SELECT * FROM `registration_requests` ";
+            $query = "SELECT " . $select_clause . " FROM `registration_requests` ";
             $where_clause = $this->_bild_filters($filters, $table_fields, $params);
             //print_r($where_clause);
             $result = $db->queryArguments($query . (strlen($where_clause) ? ' WHERE ' . $where_clause : ''), $params);
             //print_r($db->getQueryString()); echo("\r");
+            if (!$result) throw new Exception('result of query is false');
             return $result->fetch_assoc_array();
 
         } catch (Exception $e) {
-            throw new Exception($e->getMessage());
+            throw new Exception('can not fetch registration requests', 0, $e);
         }
     }
 
-    private function _approve_registration_request($filters, $admin_id) {
+    private function _approve_registration_request($filters, $registrator, $option) {
         try {
+            //echo('options='); print_r($option); echo("\n");
+            $check_fields = ['account_id'];
+            $check_int_fields = ['account_id'];
 
+            $this->_check_fields($option, $check_fields, $check_int_fields, false);
             // выбрать заявки по фильтрам
             $requests = $this->_get_registration_requests($filters);
+            if (count($requests) != 1) throw new Exception('multiple approval is not allowed');
+
+            $this->_db = $this->db_open();
+            $this->_db->getMysqli()->begin_transaction(); //(MYSQLI_TRANS_START_READ_WRITE);
+
+            $request = $requests[0];
             // создать пользователей
-
+            $this->_create_user($request['vk_user_id'], 'USER', $registrator);    
+            // привязать лс
+            $this->_link_account($request['vk_user_id'], $option->account_id);
             // заапрувить заявки
-            if (!strlen($where_clause)) throw new Exception('no filters given');
+            $result = $this->_db->query("UPDATE `registration_requests`
+                 SET `is_approved` = 1, 
+                 `processed_by` = ?i
+                 WHERE `id` = ?i;",
+                 $registrator,
+                 $request['id']);
 
-            $result = $db->queryArguments($query . ' WHERE ' . $where_clause, $params);
-            if (!$result) throw new Exception('result of query is false');
+            $this->_db->getMysqli()->commit();
 
         } catch (Exception $e) {
-            throw new Exception($e->getMessage());
+            if ($this->_db) $this->_db->getMysqli()->rollback();
+            //print_r($e);
+            throw new Exception('can not aprove request', 0, $e);
+
+        } finally {
+            if ($this->_db) {
+                $this->_db->__destruct();
+                $this->_db = null;
+            }
         }
+
     }
 
-    private function _reject_registration_request($filters, $admin_id) {
+    private function _reject_registration_request($filters, $admin_id, $option) {
         try {
+
+            $rejection_reason= "";
+            if (is_object($option) && property_exists($option, 'rejection_reason')) $rejection_reason= $option->rejection_reason;
+
             $db = $this->db_open();
 
             $table_fields = $this->_get_table_info('registration_requests');
@@ -428,7 +515,8 @@ class VkMiniAppController {
 
             $params = [];
             $params[] = $admin_id;
-            $query = "UPDATE `registration_requests` SET `is_approved` = 0, `processed_by` = ?i ";
+            $params[] = $rejection_reason;
+            $query = "UPDATE `registration_requests` SET `is_approved` = 0, `processed_by` = ?i, `rejection_reason` = '?s' ";
             $where_clause = $this->_bild_filters($filters, $table_fields, $params);
 
             if (!strlen($where_clause)) throw new Exception('no filters given');
@@ -438,6 +526,79 @@ class VkMiniAppController {
 
         } catch (Exception $e) {
             throw new Exception($e->getMessage());
+        }
+    }
+
+    private function _create_user($user_id, $priveleges, $registrator) {
+        try {
+            if (!$this->_is_user_exists($user_id)) {
+                if ($this->_db) $db = $this->_db; else $db = $this->db_open();
+                $result = $db->query("
+                    INSERT INTO `vk_users` 
+                    (`vk_user_id`, 
+                    `privileges`, 
+                    `registered_by`) 
+                    VALUES (?i, '?s', ?i);",
+                $user_id,
+                $priveleges,
+                $registrator);
+                if (!$result) throw new Exception('result of query is false');
+            }
+
+        } catch (Exception $e) {
+            throw new Exception('can not create user', 0, $e);
+        }
+    }
+
+    private function _link_account($user_id, $account) {
+        try {
+            if ($this->_is_user_exists($user_id) && !$this->_is_link_exists($user_id, $account)) {
+                if ($this->_db) $db = $this->_db; else $db = $this->db_open();
+                $result = $db->query("
+                    INSERT INTO `accounts` 
+                    (`vk_user_id`, 
+                    `acc_id`) 
+                    VALUES (?i, ?i);",
+                $user_id,
+                $account);
+                if (!$result) throw new Exception('result of query is false');
+            }
+
+        } catch (Exception $e) {
+            throw new Exception('can not link account to user', 0, $e);
+        }
+    }
+
+    private function _is_link_exists($user_id, $account) {
+        try {
+            if ($this->_db) $db = $this->_db; else $db = $this->db_open();
+            $result = $db->query("
+                SELECT `id` 
+                FROM `accounts` 
+                WHERE `vk_user_id` = ?i AND `acc_id` = ?i;",
+            $user_id,
+            $account);
+            if ($result === false) throw new Exception('bad db query');
+            return ($result->getNumRows() != 0);
+
+        } catch (Exception $e) {
+            throw new Exception('can not check user existence', 0, $e);
+        }
+    }
+
+    private function _is_user_exists($user_id) {
+        try {
+            if ($this->_db) $db = $this->_db; else $db = $this->db_open();
+            $result = $db->query("
+                SELECT `vk_user_id` 
+                FROM `vk_users` 
+                WHERE `vk_user_id` = ?i;",
+            $user_id);
+            if ($result === false) throw new Exception('bad db query');
+            return ($result->getNumRows() != 0);
+
+        } catch (Exception $e) {
+            throw new Exception('can not check user existence', 0, $e);
         }
     }
 
