@@ -9,5 +9,11 @@ $_Config = [
     'db_charset' => 'utf8',
     // server options
     'server_mode' =>'production',
+    // vk app id
+    'vk_app_id' => '',
+    // client vk app secret key
+    'client_secret' => '',
+    // random phrase to generate auth token for clients
+    'server_key' => 'Придумайте случайную строку'
 ];
 ?>

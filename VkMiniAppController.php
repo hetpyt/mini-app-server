@@ -7,18 +7,63 @@ class VkMiniAppController {
 
     protected $_db;
 
+    // ид пользователя, полученный через строку запроса
+    private $_user_id;
+
     /**
+    * @noAuth
     * @url GET /
     */
-    public function root() {
-        throw new RestException(404, 'Service unavaulable!');
+    public function app() {
+        global $_Config;
+
+        //throw new RestException(404, 'Service unavaulable!');
+        //print_r($_GET);
+        $sign_params = [];
+        foreach ($_GET as $name => $value) {
+            if (strpos($name, 'vk_') !== 0) { // Получаем только vk параметры из query
+                continue;
+            }
+            $sign_params[$name] = $value;
+        }
+        // проверка ид приложения вк
+        if ($sign_params['vk_app_id'] != $_Config['vk_app_id']) {
+            echo 'wrong app id';
+            return;
+        }
+        // Сортируем массив по ключам 
+        ksort($sign_params); 
+        // Формируем строку вида "param_name1=value&param_name2=value"
+        $sign_params_query = http_build_query($sign_params); 
+        // Получаем хеш-код от строки, используя защищеный ключ приложения. Генерация на основе метода HMAC. 
+        $sign = $this->_hash($sign_params_query, $_Config['client_secret']);
+        // Сравниваем полученную подпись со значением параметра 'sign'
+        $status = $sign === $_GET['sign']; 
+        if ($status) {
+            // все хорошо, подпись верна
+            setcookie(
+                'rest_auth_token', 
+                $this->_hash($sign_params['vk_user_id'].'_'.$sign_params['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']),
+                0, // истекает
+                '', // путь
+                '', // домен
+                true, // только шифрованое соединения
+                true // только протокол http
+            );
+            echo file_get_contents('../mini-app/build/index.html');
+        } else {
+            // подпись не верна
+            echo 'invalid request sign';
+        }
     }
 
     /**
+    * @noAuth
     * @url GET /test
     */
     public function test() {
-        print_r($this->_get_table_info('registration_requests'));
+        //print_r($this->_get_table_info('registration_requests'));
+        print_r($_GET);
     }
 
     /**
@@ -29,11 +74,11 @@ class VkMiniAppController {
     }
 
     /**
-    * @noAuth
-    * @url GET /registrationstatus/$user_id
+    * @url GET /registrationstatus
     */
-    public function registration_status($user_id) {
+    public function registration_status() {
         try {
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
             $data = null;
             $db = $this->db_open();
 
@@ -46,33 +91,32 @@ class VkMiniAppController {
                 `acc_id`
             FROM `registration_requests` 
             WHERE `vk_user_id` = ?i AND `hide_in_app` = 0 AND 'del_in_app' = 0;", 
-            $user_id);
+            $this->_user_id);
 
             if ($result->getNumRows() != 0) {
                 $data = $result->fetch_assoc_array();
             }
-            sleep(1);
             return $this->return_result($data);
 
         } catch (Exception $e) {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
-            return $this->return_result($data, false);
-
+            return $this->return_result($e->getMessage(), false);
         }
     }
 
     /**
-    * @noAuth
     * @url POST /adminprocessregistrationrequests
     */
     public function admin_process_registration_requests($data) {
         try {
-            $check_fields = ['result', 'vk_user_id', 'action', 'filters'];
-            $check_int_fields = ['vk_user_id'];
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+            
+            $check_fields = ['result', 'action', 'filters'];
+            $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
 
-            if (!$this->_check_user_privileges($data->vk_user_id, 'OPERATOR'))  throw new Exception('not priveleged user');
+            if (!$this->_check_user_privileges('OPERATOR'))  throw new Exception('not priveleged user');
 
             $action = strtoupper($data->action);
             $res_data = null;
@@ -90,11 +134,11 @@ class VkMiniAppController {
                     break;
 
                 case "APPROVE":
-                    $res_data = $this->_approve_registration_request($data->filters, $data->vk_user_id, $options);
+                    $res_data = $this->_approve_registration_request($data->filters, $options);
                     break;
 
                 case "REJECT":
-                    $res_data = $this->_reject_registration_request($data->filters, $data->vk_user_id, $options);
+                    $res_data = $this->_reject_registration_request($data->filters, $options);
                     break;
 
                 default:
@@ -111,13 +155,14 @@ class VkMiniAppController {
     }
 
     /**
-    * @noAuth
     * @url POST /registrationrequestaction
     */
     public function registration_request_action($data) {
-        $check_fields = ['result', 'vk_user_id', 'request_id', 'action'];
-        $check_int_fields = ['vk_user_id', 'request_id'];
         try {
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+
+            $check_fields = ['result', 'request_id', 'action'];
+            $check_int_fields = ['request_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
             //print_r($data->action);
             if (!$data->result) throw new Exception('result not true');
@@ -140,26 +185,23 @@ class VkMiniAppController {
                 $result = $db->query(
                     "UPDATE `registration_requests` ".$set_clause." WHERE `registration_requests`.`id` = ?i AND `registration_requests`.`vk_user_id` = ?i", 
                     $data->request_id,
-                    $data->vk_user_id);
+                    $this->_user_id);
 
-                //print_r($db->getQueryString());
-                sleep(1);
                 return $this->return_result(null, true);
             }
 
         } catch (Exception $e) {
             return $this->return_result($e->getMessage(), false);
-
         }
-
     }
 
     /**
-    * @noAuth
     * @url POST /registrationrequest
     */
     public function registration_request($data) {
         try {
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+
             $check_fields = ['result', 'registration_data'];
             $this->_check_fields($data, $check_fields, [], false);
 
@@ -167,19 +209,17 @@ class VkMiniAppController {
             // данные по показаниям
             $reg_data = $data->registration_data;
 
-            $check_fields = ['vk_user_id', 'acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
-            $check_int_fields = ['vk_user_id'];
+            $check_fields = ['acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
+            $check_int_fields = [];
             $this->_check_fields($reg_data, $check_fields, $check_int_fields, true);
-
-            if (0 === $reg_data->vk_user_id) throw new Exception('bad vk user');
 
             $rows_inserted = 0;
 
             $db = $this->db_open();
             
             $db->query("INSERT INTO `registration_requests` (`vk_user_id`, `acc_id`, `surname`, `first_name`, `patronymic`, `street`, `n_dom`, `n_kv`)
-                VALUES (?i, '?s', '?s', '?s', '?s', '?s', '?s', ?s);", 
-                $reg_data->vk_user_id,
+                VALUES (?i, '?s', '?s', '?s', '?s', '?s', '?s', '?s');", 
+                $this->_user_id,
                 $reg_data->acc_id,
                 $reg_data->surname,
                 $reg_data->first_name,
@@ -193,17 +233,17 @@ class VkMiniAppController {
 
         } catch(Exception $e) {
             return $this->return_result($e->getMessage(), false);
-            
         }
     }
 
     /**
-    * @noAuth
-    * @url GET /getuser/$id
+    * @url GET /getuser
     */
-    public function getuser($id) {
-        $client_columns = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr'];
+    public function getuser() {
         try {
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+
+            $client_columns = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr'];
             $data = null;
             $db = $this->db_open();
 
@@ -222,7 +262,7 @@ class VkMiniAppController {
             LEFT JOIN `accounts` ON `accounts`.`vk_user_id` = `vk_users`.`vk_user_id`
             LEFT JOIN `clients` ON `clients`.`acc_id` = `accounts`.`acc_id`
             WHERE `vk_users`.`vk_user_id` = ?i;", 
-            $id);
+            $this->_user_id);
 
             if ($result->getNumRows() != 0) {
                 $data = $this->expand_db_result($result, $client_columns, 'accounts');
@@ -242,16 +282,16 @@ class VkMiniAppController {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
             return $this->return_result($e->getMessage(), false);
-            
         }
     }
     
     /**
-    * @noAuth
     * @url GET /getmeters/$acc_id
     */
     public function getmeters($acc_id) {
         try {
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+
             $data = null;
             $db = $this->db_open();
 
@@ -282,34 +322,30 @@ class VkMiniAppController {
                 $data = $result->fetch_assoc_array();
             }    
 
-            sleep(1);
             return $this->return_result($data);
 
         } catch (Exception $e) {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
-            return $this->return_result(null, false);
-            
+            return $this->return_result($e->getMessage(), false);
         }
     } 
 
     /**
-    * @noAuth
     * @url POST /setmeters
     */
     public function setmeters($data) {
         try {
-            //echo('data='); print_r($data); echo("\n");
-            $check_fields = ['result', 'vk_user_id', 'meters'];
-            $check_int_fields = ['vk_user_id'];
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+
+            $check_fields = ['result', 'meters'];
+            $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, true);
 
             if (!$data->result) throw new Exception('result not true');
 
             //check user
-            if (!$this->_check_user_privileges($data->vk_user_id, 'user')) {
-                throw new Exception('not priveleged user');
-            }
+            if (!$this->_check_user_privileges('user')) throw new Exception('not priveleged user');
             // данные по показаниям
             $meters = $data->meters;
             if (!is_array($meters)) throw new Exception('bad meters data');
@@ -329,20 +365,41 @@ class VkMiniAppController {
                 VALUES ";
                 foreach($meters as $meter) {
                     $query .= ($rows_inserted ? ',' : '').(is_numeric($meter->new_count) 
-                        ? $db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $data->vk_user_id) 
-                        : $db->prepare("(?i, NULL, ?i)", $meter->meter_id, $data->vk_user_id));
+                        ? $db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $this->_user_id) 
+                        : $db->prepare("(?i, NULL, ?i)", $meter->meter_id, $this->_user_id));
                     $rows_inserted++;
                 }
                 //throw new Exception($query);
                 if ($rows_inserted) $result = $db->query($query);
 
-                sleep(1);
                 return $this->return_result(null, true);
             }
         } catch(Exception $e) {
             return $this->return_result($e->getMessage(), false);
             
         }
+    }
+
+    public function authorize() {
+        global $_Config;
+        $user_id = '';
+        $token = '';
+        // получим токен
+        if (array_key_exists('token', $_GET)) {
+            $token = $_GET['token'];
+        }
+        elseif (array_key_exists('rest_auth_token', $_COOKIE)) {
+            $token = $_COOKIE['rest_auth_token'];
+        }
+        // получим пользователя
+        if (array_key_exists('user_id', $_GET)) {
+            $user_id = $_GET['user_id'];  
+        }
+        if (!$user_id || !$token) return false;
+        $expected_token = $this->_hash($user_id.'_'.$_Config['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']);
+        $status = $expected_token === $token;
+        if ($status) $this->_user_id = $user_id;
+        return $status;
     }
 
     private function _get_table_info($table_name) {
@@ -459,9 +516,11 @@ class VkMiniAppController {
         }
     }
 
-    private function _approve_registration_request($filters, $registrator, $option) {
+    private function _approve_registration_request($filters, $option) {
         try {
-            //echo('options='); print_r($option); echo("\n");
+            $registrator = $this->_user_id;
+            //echo('options='); pr
+            int_r($option); echo("\n");
             $check_fields = ['account_id'];
             $check_int_fields = ['account_id'];
 
@@ -502,9 +561,9 @@ class VkMiniAppController {
 
     }
 
-    private function _reject_registration_request($filters, $admin_id, $option) {
+    private function _reject_registration_request($filters, $option) {
         try {
-
+            $registrator = $this->_user_id;
             $rejection_reason= "";
             if (is_object($option) && property_exists($option, 'rejection_reason')) $rejection_reason= $option->rejection_reason;
 
@@ -514,7 +573,7 @@ class VkMiniAppController {
             if ($table_fields === false) throw new Exception('can not fetch data schema');
 
             $params = [];
-            $params[] = $admin_id;
+            $params[] = $registrator;
             $params[] = $rejection_reason;
             $query = "UPDATE `registration_requests` SET `is_approved` = 0, `processed_by` = ?i, `rejection_reason` = '?s' ";
             $where_clause = $this->_bild_filters($filters, $table_fields, $params);
@@ -602,7 +661,7 @@ class VkMiniAppController {
         }
     }
 
-    private function _check_user_privileges($user_id, $requested_privilege) {
+    private function _check_user_privileges($requested_privilege) {
         try {
             $priv_clause = '';
             $requested_privilege = strtoupper($requested_privilege);
@@ -622,7 +681,7 @@ class VkMiniAppController {
                 SELECT `vk_user_id` 
                 FROM `vk_users` 
                 WHERE `vk_user_id` = ?i AND `is_blocked` = 0 AND `privileges` IN (".$priv_clause.");",
-            $user_id);
+            $this->_user_id);
             //print_r($db->getQueryString()); echo("\n");
 
             return ($result->getNumRows() != 0 );
@@ -702,5 +761,16 @@ class VkMiniAppController {
         ->setCharset($_Config['db_charset']);
 
         return $db;
+    }
+
+    private function _hash($data, $key) {
+        $result = rtrim(
+            strtr(
+                base64_encode(
+                    hash_hmac('sha256', $data, $key, true)
+                ),
+            '+/', '-_'), 
+        '='); 
+        return $result;
     }
 }
