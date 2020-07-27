@@ -101,7 +101,7 @@ class VkMiniAppController {
         } catch (Exception $e) {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
-            return $this->return_result($e->getMessage(), false);
+            return $this->return_error($e->getMessage());
         }
     }
 
@@ -111,12 +111,14 @@ class VkMiniAppController {
     public function admin_process_registration_requests($data) {
         try {
             if (!$this->_user_id) throw new Exception('unauthenticated user');
-            
+            if (!$this->_check_user_privileges('OPERATOR'))  throw new Exception('not priveleged user');
+
             $check_fields = ['result', 'action', 'filters'];
             $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
 
-            if (!$this->_check_user_privileges('OPERATOR'))  throw new Exception('not priveleged user');
+            if (!$data->result) throw new Exception('result not true');
+            if (!is_array($data->filters)) throw new Exception("filters is not array");
 
             $action = strtoupper($data->action);
             $res_data = null;
@@ -141,6 +143,10 @@ class VkMiniAppController {
                     $res_data = $this->_reject_registration_request($data->filters, $options);
                     break;
 
+                case "DELETE":
+                    $res_data = $this->_delete_registration_request($data->filters, $options);
+                    break;
+
                 default:
                     throw new Exception('unknown action');
             }
@@ -150,7 +156,45 @@ class VkMiniAppController {
         } catch (Exception $e) {
             //print_r($e->getMessage());
             //throw new RestException(404, 'Service unavaulable!');
-            return $this->return_result($e->getMessage(), false);
+            return $this->return_error($e->getMessage());
+        }
+    }
+
+    /**
+    * @url POST /adminprocessdata
+    */
+    public function admin_process_data($data) {
+        try {
+            if (!$this->_user_id) throw new Exception('unauthenticated user');
+            if (!$this->_check_user_privileges('OPERATOR'))  throw new Exception('not priveleged user');
+
+            // проверка данных
+            $check_fields = ['result', 'data'];
+            $check_int_fields = [];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false, 'checking data');
+
+            if (!$data->result) throw new Exception('result not true');
+            $data_to_fill = $data->data;
+            if (!is_array($data_to_fill)) throw new Exception("data is not array");
+            // поля для проверки аккаунтов 
+            $check_fields_acc = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr', 'meters'];
+            $check_int_fields_acc = ['acc_id', 'secret_code'];
+            // поля для проверки счетчиков
+            $check_fields_mtr = ['code', 'title', 'current_count'];
+            $check_int_fields_mtr = ['code', 'current_count'];
+            foreach ($data_to_fill as $account) {
+                $this->_check_fields($account, $check_fields_acc, $check_int_fields_acc, false, 'checking account');
+                foreach ($account->meters as $meter) {
+                    $this->_check_fields($meter, $check_fields_mtr, $check_int_fields_mtr, false, 'checking meter');
+                }
+            }
+            // загрузка данных
+            $this->_fill_data($data_to_fill);
+
+            return $this->return_result(null);
+
+        } catch (Exception $e) {
+            return $this->return_error($e->getMessage());
         }
     }
 
@@ -187,11 +231,11 @@ class VkMiniAppController {
                     $data->request_id,
                     $this->_user_id);
 
-                return $this->return_result(null, true);
+                return $this->return_result(null);
             }
 
         } catch (Exception $e) {
-            return $this->return_result($e->getMessage(), false);
+            return $this->return_error($e->getMessage());
         }
     }
 
@@ -202,6 +246,8 @@ class VkMiniAppController {
         try {
             if (!$this->_user_id) throw new Exception('unauthenticated user');
 
+            // !TODO проверить количество ожидающих заявок
+
             $check_fields = ['result', 'registration_data'];
             $this->_check_fields($data, $check_fields, [], false);
 
@@ -209,11 +255,14 @@ class VkMiniAppController {
             // данные по показаниям
             $reg_data = $data->registration_data;
 
-            $check_fields = ['acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv'];
-            $check_int_fields = [];
+            $check_fields = ['acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv', 'secret_code'];
+            $check_int_fields = ['secret_code'];
             $this->_check_fields($reg_data, $check_fields, $check_int_fields, true);
 
-            $rows_inserted = 0;
+            // проверка секретного кода
+            if (!$this->_check_secret_code($reg_data->acc_id, $reg_data->secret_code)) {
+                return $this->return_error('Неверно введн номер лицевого счета или проверочный код', 'CODE_CHECK_FAIL');
+            }
 
             $db = $this->db_open();
             
@@ -229,10 +278,10 @@ class VkMiniAppController {
                 (string)$reg_data->n_kv
             );
 
-            return $this->return_result(null, true);
+            return $this->return_result(null);
 
         } catch(Exception $e) {
-            return $this->return_result($e->getMessage(), false);
+            return $this->return_error($e->getMessage());
         }
     }
 
@@ -281,7 +330,7 @@ class VkMiniAppController {
         } catch (Exception $e) {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
-            return $this->return_result($e->getMessage(), false);
+            return $this->return_error($e->getMessage());
         }
     }
     
@@ -302,7 +351,7 @@ class VkMiniAppController {
                 `meters`.`current_count`,
                 `meters`.`updated`, 
                 `lastIndications`.`count` as 'new_count',
-                `lastIndications`.`recieve_date`,
+                DATE_FORMAT(`lastIndications`.`recieve_date`, '%d.%m.%Y') AS `recieve_date`,
                 `lastIndications`.`vk_user_id`
             FROM `meters` 
             LEFT JOIN (
@@ -327,7 +376,7 @@ class VkMiniAppController {
         } catch (Exception $e) {
             //print_r($e);
             //throw new RestException(404, 'Service unavaulable!');
-            return $this->return_result($e->getMessage(), false);
+            return $this->return_error($e->getMessage());
         }
     } 
 
@@ -372,11 +421,10 @@ class VkMiniAppController {
                 //throw new Exception($query);
                 if ($rows_inserted) $result = $db->query($query);
 
-                return $this->return_result(null, true);
+                return $this->return_result(null);
             }
         } catch(Exception $e) {
-            return $this->return_result($e->getMessage(), false);
-            
+            return $this->return_error($e->getMessage());
         }
     }
 
@@ -520,7 +568,7 @@ class VkMiniAppController {
         try {
             $registrator = $this->_user_id;
             //echo('options='); pr
-            int_r($option); echo("\n");
+            //int_r($option); echo("\n");
             $check_fields = ['account_id'];
             $check_int_fields = ['account_id'];
 
@@ -584,7 +632,107 @@ class VkMiniAppController {
             if (!$result) throw new Exception('result of query is false');
 
         } catch (Exception $e) {
-            throw new Exception($e->getMessage());
+            throw new Exception('can not reject request', 0, $e);
+        }
+    }
+
+    private function _delete_registration_request($filters, $option) {
+        try {
+            $db = $this->db_open();
+
+            $table_fields = $this->_get_table_info('registration_requests');
+            if ($table_fields === false) throw new Exception('can not fetch data schema');
+
+            $params = [];
+            $query = "DELETE FROM `registration_requests` ";
+            $where_clause = $this->_bild_filters($filters, $table_fields, $params);
+
+            if (!strlen($where_clause)) throw new Exception('no filters given');
+
+            //удаляем только удаленные пользователем!
+            $where_clause .= " AND `del_in_app` = 1";
+
+            $result = $db->queryArguments($query . ' WHERE ' . $where_clause, $params);
+            if (!$result) throw new Exception('result of query is false');
+
+        } catch (Exception $e) {
+            throw new Exception('can not delete request', 0, $e);
+        }
+    }
+
+    private function _fill_data($data) {
+        try {
+            $this->_db = $this->db_open();
+            $this->_db->getMysqli()->begin_transaction(); //(MYSQLI_TRANS_START_READ_WRITE);
+            // очистка таблиц
+            $this->_clear_table('indications');
+            $this->_clear_table('meters');
+            $this->_clear_table('clients');
+            // заполнение таблицы clients
+            $query = "INSERT INTO `clients` (`acc_id`, `secret_code`, `acc_id_repr`, `tenant_repr`, `address_repr`) VALUES ";
+            $clients_values_clause = "";
+            $meters_values_clause = "";
+            $clients_lines = 0;
+            $meters_lines = 0;
+            foreach ($data as $account) {
+                $clients_values_clause .= ($clients_lines ? ", " : "") . $this->_db->prepare("(?i, ?i, '?s', '?s', '?s')",
+                (int)$account->acc_id,
+                (int)$account->secret_code,
+                $account->acc_id_repr,
+                $account->tenant_repr,
+                $account->address_repr);
+
+                $clients_lines ++;
+
+                foreach ($account->meters as $meter) {
+                    $meters_values_clause .= ($meters_lines ? ", " : "") . $this->_db->prepare("(?i, ?i, '?s', ?i)",
+                    (int)$meter->code,
+                    (int)$account->acc_id,
+                    $meter->title,
+                    $meter->current_count);
+
+                    $meters_lines ++;
+                }
+            }
+            // вставка аккаунтов
+            $result = true;
+            if ($clients_lines) {
+                $result = $this->_db->query($query . $clients_values_clause);
+            }
+            if (!$result) throw new Exception("result of query '$query' is false");
+            // вставка счетчиков
+            $result = true;
+            $query = "INSERT INTO `meters` (`index_num`, `acc_id`, `title`, `current_count`) VALUES ";
+            if ($meters_lines) {
+                $result = $this->_db->query($query . $meters_values_clause);
+            }
+            if (!$result) throw new Exception("result of query '$query' is false");
+            // коммит транзакции 
+            $this->_db->getMysqli()->commit();
+
+        } catch (Exception $e) {
+            // откат транзакции
+            if ($this->_db) $this->_db->getMysqli()->rollback();
+            throw new Exception("can not fill data: " . $e->getMessage(), 0, $e);
+
+        } finally {
+            if ($this->_db) {
+                $this->_db->__destruct();
+                $this->_db = null;
+            }
+        }
+    }
+
+    private function _clear_table($table_name) {
+        try {
+            $allowed_tables = ['clients', 'meters', 'indications'];
+            if (!in_array($table_name, $allowed_tables)) throw new Exception("not allowed table '$table_name'");
+            if ($this->_db) $db = $this->_db; else $db = $this->db_open();
+            $result = $db->query("DELETE FROM `".$table_name."`;");
+            if (!$result) throw new Exception('result of query is false');
+
+        } catch (Exception $e) {
+            throw new Exception("can not clear table '$table_name'", 0, $e);
         }
     }
 
@@ -661,6 +809,26 @@ class VkMiniAppController {
         }
     }
 
+    private function _check_secret_code($acc_id_repr, $Secret_code) {
+        try {
+            $db = $this->db_open();
+            $result = $db->query("
+                SELECT 
+                    `acc_id`, 
+                    `secret_code` 
+                FROM `clients` 
+                WHERE `secret_code` = ?i AND `acc_id_repr` LIKE '%?S%'",
+            $Secret_code,
+            $acc_id_repr);
+
+            $data = $result->fetch_assoc_array();
+            return (count($data) === 1);
+
+        } catch (Exception $e) {
+            throw new Exception("can not check secret code: " . $e->getMessage(), 0, $e);
+        }
+    }
+
     private function _check_user_privileges($requested_privilege) {
         try {
             $priv_clause = '';
@@ -693,7 +861,7 @@ class VkMiniAppController {
         }
     }
 
-    private function _check_fields(&$data, $fields, $int_fields, $set_zero = true) {
+    private function _check_fields(&$data, $fields, $int_fields, $set_zero = true, $context = null) {
         if (is_array($data)) {
             foreach ($data as $dataItem) {
                 $this->_check_fields($dataItem, $fields, $int_fields, $set_zero);
@@ -701,15 +869,15 @@ class VkMiniAppController {
 
         } else if (is_object($data)) {
             foreach ($fields as $field) {
-                if (!property_exists($data, $field)) throw new Exception("field '$field' not exists");
+                if (!property_exists($data, $field)) throw new Exception(($context ? "$context. " : "") . "field '$field' not exists");
                 if (in_array($field, $int_fields) && !is_numeric($data->{$field})) {
                     if ($set_zero) $data->{$field} = 0;
-                    else throw new Exception("not int value in field '$field'");
+                    else throw new Exception(($context ? "$context. " : "") . "not int value in field '$field'");
                 }
             }
 
         } else {
-            throw new Exception("data must been array or object");
+            throw new Exception(($context ? "$context. " : "") . "data must been array or object");
         }
     }
 
@@ -733,9 +901,9 @@ class VkMiniAppController {
         return $data;
     }
 
-    private function return_result($data, $result = true) {
+    private function return_result($data) {
         $ret_data = [
-            'result' => $result,
+            'result' => true,
             'data' => [],
             'data_len' => 0
         ];
@@ -746,6 +914,19 @@ class VkMiniAppController {
                 array_push($ret_data['data'], $data);
         }
         $ret_data['data_len'] = count($ret_data['data']);
+        return  $ret_data;
+    }
+
+    private function return_error($message, $name = '') {
+        $ret_data = [
+            'result' => false,
+            'data' => [],
+            'error' => [
+                'name' => $name,
+                'message' => $message
+            ],
+            'data_len' => 0
+        ];
         return  $ret_data;
     }
 
