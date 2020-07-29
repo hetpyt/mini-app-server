@@ -67,6 +67,20 @@ class VkMiniAppController {
     }
 
     /**
+    * @noAuth
+    * @url POST /ptest
+    */
+    public function ptest($data) {
+        try {
+            $result = $this->_get_registration_requests($data, 'list');
+            echo('result='); print_r($result); echo("\n");
+        } catch (Exception $e) {
+            echo($e->getMessage());
+        }
+
+}
+
+    /**
     * @url POST /echo
     */
     public function post_echo($data) {
@@ -113,11 +127,10 @@ class VkMiniAppController {
             if (!$this->_user_id) throw new Exception('unauthenticated user');
             if (!$this->_check_user_privileges('OPERATOR'))  throw new Exception('not priveleged user');
 
-            $check_fields = ['result', 'action', 'filters'];
+            $check_fields = ['action', 'filters'];
             $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
 
-            if (!$data->result) throw new Exception('result not true');
             if (!is_array($data->filters)) throw new Exception("filters is not array");
 
             $action = strtoupper($data->action);
@@ -169,29 +182,23 @@ class VkMiniAppController {
             if (!$this->_check_user_privileges('OPERATOR'))  throw new Exception('not priveleged user');
 
             // проверка данных
-            $check_fields = ['result', 'data'];
+            $check_fields = ['action', 'data'];
             $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, false, 'checking data');
 
-            if (!$data->result) throw new Exception('result not true');
-            $data_to_fill = $data->data;
-            if (!is_array($data_to_fill)) throw new Exception("data is not array");
-            // поля для проверки аккаунтов 
-            $check_fields_acc = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr', 'meters'];
-            $check_int_fields_acc = ['acc_id', 'secret_code'];
-            // поля для проверки счетчиков
-            $check_fields_mtr = ['code', 'title', 'current_count'];
-            $check_int_fields_mtr = ['code', 'current_count'];
-            foreach ($data_to_fill as $account) {
-                $this->_check_fields($account, $check_fields_acc, $check_int_fields_acc, false, 'checking account');
-                foreach ($account->meters as $meter) {
-                    $this->_check_fields($meter, $check_fields_mtr, $check_int_fields_mtr, false, 'checking meter');
-                }
-            }
-            // загрузка данных
-            $this->_fill_data($data_to_fill);
+            $ret_data = null;
+            $action = strtoupper($data->action);
+            switch ($action) {
+                case "UPLOAD":
+                    $ret_data = $this->_process_data_upload($data->data);
+                    break;
 
-            return $this->return_result(null);
+                case "DOWNLOAD":
+                    $ret_data = $this->_process_data_download($data->data);
+                    break;
+            }
+
+            return $this->return_result($ret_data);
 
         } catch (Exception $e) {
             return $this->return_error($e->getMessage());
@@ -205,11 +212,10 @@ class VkMiniAppController {
         try {
             if (!$this->_user_id) throw new Exception('unauthenticated user');
 
-            $check_fields = ['result', 'request_id', 'action'];
+            $check_fields = ['request_id', 'action'];
             $check_int_fields = ['request_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
             //print_r($data->action);
-            if (!$data->result) throw new Exception('result not true');
 
             $db = $this->db_open();
             $set_clause = 'SET ';
@@ -248,10 +254,9 @@ class VkMiniAppController {
 
             // !TODO проверить количество ожидающих заявок
 
-            $check_fields = ['result', 'registration_data'];
+            $check_fields = ['registration_data'];
             $this->_check_fields($data, $check_fields, [], false);
 
-            if (!$data->result) throw new Exception('result not true');
             // данные по показаниям
             $reg_data = $data->registration_data;
 
@@ -351,7 +356,7 @@ class VkMiniAppController {
                 `meters`.`current_count`,
                 `meters`.`updated`, 
                 `lastIndications`.`count` as 'new_count',
-                DATE_FORMAT(`lastIndications`.`recieve_date`, '%d.%m.%Y') AS `recieve_date`,
+                DATE_FORMAT(`lastIndications`.`recieve_date`, '%d.%m.%Y') AS 'recieve_date',
                 `lastIndications`.`vk_user_id`
             FROM `meters` 
             LEFT JOIN (
@@ -387,11 +392,9 @@ class VkMiniAppController {
         try {
             if (!$this->_user_id) throw new Exception('unauthenticated user');
 
-            $check_fields = ['result', 'meters'];
+            $check_fields = ['meters'];
             $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, true);
-
-            if (!$data->result) throw new Exception('result not true');
 
             //check user
             if (!$this->_check_user_privileges('user')) throw new Exception('not priveleged user');
@@ -456,7 +459,9 @@ class VkMiniAppController {
 
             $result = $db->query("SELECT 
             `COLUMN_NAME`,
-            `DATA_TYPE`
+            `DATA_TYPE`,
+            `IS_NULLABLE`,
+            `COLUMN_TYPE`
             FROM `information_schema`.`COLUMNS`
             WHERE `TABLE_NAME` = '?s' AND `TABLE_SCHEMA` = DATABASE();",
             $table_name);
@@ -468,29 +473,89 @@ class VkMiniAppController {
         }
     }
 
+    private function _is_values_array_contents_null($values) {
+        foreach ($values as $value) {
+            if ( is_null($value) || (is_string($value) && strtoupper($value) === "NULL") ) return true;
+        }
+        return false;
+    }
+
+    private function _build_date_condition($field, $value, $data_type, &$params) {
+        $condition = '';
+
+        if (is_array($value)) {
+            $len = count($value);
+            if (!$len) {
+                // пустой массив - ложное условие
+                $condition = " FALSE ";
+            } elseif ($len == 1) {
+                // один элемент
+                $condition = " DATE(`$field`) = '?s' ";
+                $params[] = $this->_str_to_date($value[0]);
+            } else {
+                // в массиве две даты: меньшая - начало периода, большая - конец периода
+                sort($value);
+                $condition = " `$field` BETWEEN '?s' AND '?s' ";
+                $params[] = $this->_str_to_date($value[0], [
+                    "hour" => 0,
+                    "minute" => 0,
+                    "second" => 0
+                ]);
+                $params[] = $this->_str_to_date($value[$len - 1], [
+                    "hour" => 23,
+                    "minute" => 59,
+                    "second" => 59
+                ]);
+            }
+        } else {
+            // одна дата: делаем выборку за день
+            $condition = " DATE(`$field`) = '?s' ";
+            $params[] = $this->_str_to_date($value);
+        }
+        return $condition;
+    }
+
+    private function _build_condition($field, $value, $data_type, &$params) {
+        $condition = '';
+        if ( is_null($value) || (is_string($value) && strtoupper($value) === "NULL") ) {
+            $condition = " `$field` IS NULL ";
+        }
+        elseif (is_array($value)) {
+            // если в массиве есть null, то нельзя использовать IN ()
+            if (!count($value)) {
+                // пустой массив - условие ложно
+                $condition = " FALSE ";
+            } elseif ($this->_is_values_array_contents_null($value)) {
+                foreach ($value as $value_item) {
+                    $condition .= (strlen($condition) ? " OR " : "") . $this->_build_condition($field, $value_item, $data_type, $params);
+                }
+                $condition = " (" . $condition . ") ";
+
+            } else {
+                $condition = " `$field` IN " . ($data_type == 'INT' ? "(?ai) " : "(?as) ");
+                $params[] = $value;
+            }
+        }
+        else {
+            $condition = " `$field` = " . ($data_type == 'INT' ? "?i " : "'?s' ");
+            $params[] = $value;
+        }
+        
+        return $condition;
+    }
+
     private function _bild_filters($filters, $table_fields, &$params) {
         
         $where_clause = '';
         if (is_array($filters)) {
             foreach ($filters as $filter) {
                 $key = array_search($filter->field, array_column($table_fields, 'COLUMN_NAME'));
-                if ($key === false) throw new Exception('bad field name');
-                $operator = "=";
-                $filler = "?s";
-                if ($filter->value === null) {
-                    $operator = "IS";
-                    $filler = "NULL";
-                }
-                else if (is_array($filter->value)) {
-                    $operator = "IN";
-                    $filler = (strtoupper($table_fields[$key]['DATA_TYPE']) == 'INT' ? "(?ai)" : "(?as)");
-                }
-                else {
-                    $filler = (strtoupper($table_fields[$key]['DATA_TYPE']) == 'INT' ? "?i" : "'?s'");
-                }
-                
-                $where_clause .= (strlen($where_clause) ? ' AND ' : '') . " `" . $filter->field . "` " . $operator . " " . $filler;
-                $params[] = $filter->value;
+                if ($key === false) throw new Exception("bad field name '$filter->field'");
+                $data_type = strtoupper($table_fields[$key]['DATA_TYPE']);
+
+                $where_clause .= (strlen($where_clause) ? " AND " : "") . ($data_type == "TIMESTAMP" 
+                    ? $this->_build_date_condition($filter->field, $filter->value, $data_type, $params)
+                    : $this->_build_condition($filter->field, $filter->value, $data_type, $params));
             }
         }
         return $where_clause;
@@ -499,7 +564,7 @@ class VkMiniAppController {
     private function _get_registration_request_detail($filters, $option = null) {
         try {
             // выбрать заявки по фильтрам
-            $requests = $this->_get_registration_requests($filters);
+            $requests = $this->_get_registration_requests($filters, 'detail');
             for ($index = 0; $index < count($requests); $index++) {
                 // подбор лицевых счетов в соответствии с заявкой
                 $account = trim($requests[$index]['acc_id']);
@@ -525,7 +590,9 @@ class VkMiniAppController {
                 $option = strtoupper($option);
                 switch ($option) {
                     case 'DETAIL':
-                        $select_clause = '*';
+                        $select_clause = "*, 
+                        DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
+                        DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'";
                         break;
 
                     case 'LIST':
@@ -533,16 +600,14 @@ class VkMiniAppController {
                             `id`, 
                             `vk_user_id`, 
                             `acc_id`, 
-                            `request_date`, 
-                            `update_date`, 
+                            DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
+                            DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date', 
                             `is_approved`, 
                             `processed_by`, 
                             `hide_in_app`, 
                             `del_in_app`";
                         break;
 
-                    default:
-                        $select_clause = '*';
                 }
             }
             $db = $this->db_open();
@@ -560,15 +625,14 @@ class VkMiniAppController {
             return $result->fetch_assoc_array();
 
         } catch (Exception $e) {
-            throw new Exception('can not fetch registration requests', 0, $e);
+            throw new Exception('can not fetch registration requests: ' . $e->getMessage(), 0, $e);
         }
     }
 
     private function _approve_registration_request($filters, $option) {
         try {
             $registrator = $this->_user_id;
-            //echo('options='); pr
-            //int_r($option); echo("\n");
+            //echo('options='); print_r($option); echo("\n");
             $check_fields = ['account_id'];
             $check_int_fields = ['account_id'];
 
@@ -657,6 +721,77 @@ class VkMiniAppController {
 
         } catch (Exception $e) {
             throw new Exception('can not delete request', 0, $e);
+        }
+    }
+
+    private function _process_data_download($data_params) {
+        try {
+            if (!is_object($data_params)) throw new Exception("data_params is not object");
+            $where_clause = "";
+            $params = [];
+            if (property_exists($data_params, 'period_begin') && strlen($data_params->period_begin)) {
+                $where_clause .= (strlen($where_clause) ? ' AND ' : '') . "`recieve_date` >= '?s'";
+                $params[] = $this->_str_to_date($data_params->period_begin, [
+                    "hour" => 0,
+                    "minute" => 0,
+                    "second" => 0
+                ]);
+            }
+            if (property_exists($data_params, 'period_end') && strlen($data_params->period_end)) {
+                $where_clause .= (strlen($where_clause) ? ' AND ' : '') . "`recieve_date` <= '?s'";
+                $params[] = $this->_str_to_date($data_params->period_end, [
+                    "hour" => 23,
+                    "minute" => 59,
+                    "second" => 59
+                ]);
+            }
+
+            $db = $this->db_open();
+            $query = "
+                SELECT  
+                    `indications`.`id` AS 'indication_id',
+                    `indications`.`count` AS 'count',
+                    `indications`.`recieve_date` AS 'recieve_date',
+                    `indications`.`vk_user_id` AS 'vk_user_id',
+                    `meters`.`index_num` AS 'meter_code',
+                    `meters`.`title` AS 'meter_title',
+                    `meters`.`current_count` AS 'current_count'
+                FROM `indications`
+                    LEFT JOIN `meters` ON `indications`.`meter_id` = `meters`.`id`";
+            if (strlen($where_clause)) {
+                $query .= " WHERE " . $where_clause;
+            }
+            $result = $db->queryArguments($query, $params);
+            if (!$result) throw new Exception('result of query is false');
+            return $result->fetch_assoc_array();
+
+        } catch (Exception $e) {
+            throw new Exception("can not process download data: " . $e->getMessage(), 0, $e);
+        }
+    }
+
+    private function _process_data_upload($data_to_fill) {
+        try {
+            if (!is_array($data_to_fill)) throw new Exception("data is not array");
+            // поля для проверки аккаунтов 
+            $check_fields_acc = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr', 'meters'];
+            $check_int_fields_acc = ['acc_id', 'secret_code'];
+            // поля для проверки счетчиков
+            $check_fields_mtr = ['code', 'title', 'current_count'];
+            $check_int_fields_mtr = ['code', 'current_count'];
+            foreach ($data_to_fill as $account) {
+                $this->_check_fields($account, $check_fields_acc, $check_int_fields_acc, false, 'checking account');
+                foreach ($account->meters as $meter) {
+                    $this->_check_fields($meter, $check_fields_mtr, $check_int_fields_mtr, false, 'checking meter');
+                }
+            }
+            // загрузка данных
+            $this->_fill_data($data_to_fill);
+
+            return null;
+
+        } catch (Exception $e) {
+            throw new Exception("can not process upload data: " . $e->getMessage(), 0, $e);
         }
     }
 
@@ -858,6 +993,19 @@ class VkMiniAppController {
             //print_r($e->getMessage());
             return false;
             
+        }
+    }
+
+    private function _str_to_date($date_str, $set_time = null) {
+        try {
+            $dt = date_create($date_str);
+            if (is_array($set_time)) date_time_set($dt, $set_time['hour'], $set_time['minute'], $set_time['second']);
+            $result = date_format($dt, "Y-m-d H:i:s");
+            if ($result === false) throw new Exception("not valid date string '$date_str'");
+            return $result;
+
+        } catch (Exception $e) {
+            throw new Exception("can not convert string '$date_str' to Date: " . $e->getMessage(), 0, $e);
         }
     }
 
