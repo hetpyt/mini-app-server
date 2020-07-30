@@ -41,16 +41,20 @@ class VkMiniAppController {
         $status = $sign === $_GET['sign']; 
         if ($status) {
             // все хорошо, подпись верна
-            setcookie(
-                'rest_auth_token', 
-                $this->_hash($sign_params['vk_user_id'].'_'.$sign_params['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']),
-                0, // истекает
-                '', // путь
-                '', // домен
-                true, // только шифрованое соединения
-                true // только протокол http
-            );
-            echo file_get_contents('../mini-app/build/index.html');
+            $auth_key = $this->_hash($sign_params['vk_user_id'].'_'.$sign_params['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']);
+            // setcookie(
+            //     'rest_auth_token', 
+            //     $this->_hash($sign_params['vk_user_id'].'_'.$sign_params['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']),
+            //     0, // истекает
+            //     '/api/', // путь
+            //     'user382795146-b7atd5wn.wormhole.vk-apps.com', // домен
+            //     true, // только шифрованое соединения
+            //     true // только протокол http
+            // );
+
+            $file_data = file_get_contents('../mini-app/build/index.html');
+            echo str_replace("</body>", "<script> var " . $this->_get_token_name($sign_params['vk_app_id']) . "='" . $auth_key . "'; </script></body>", $file_data);
+
         } else {
             // подпись не верна
             echo 'invalid request sign';
@@ -439,17 +443,25 @@ class VkMiniAppController {
         if (array_key_exists('token', $_GET)) {
             $token = $_GET['token'];
         }
-        elseif (array_key_exists('rest_auth_token', $_COOKIE)) {
-            $token = $_COOKIE['rest_auth_token'];
-        }
+        // elseif (array_key_exists('rest_auth_token', $_COOKIE)) {
+        //     $token = $_COOKIE['rest_auth_token'];
+        // }
         // получим пользователя
         if (array_key_exists('user_id', $_GET)) {
             $user_id = $_GET['user_id'];  
         }
-        if (!$user_id || !$token) return false;
-        $expected_token = $this->_hash($user_id.'_'.$_Config['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']);
-        $status = $expected_token === $token;
-        if ($status) $this->_user_id = $user_id;
+        if ($user_id && $token) {
+            $expected_token = $this->_hash($user_id.'_'.$_Config['vk_app_id'].'_'.$_Config['server_key'], $_Config['client_secret']);
+            $status = $expected_token === $token;
+            if ($status) $this->_user_id = $user_id;
+        } else {
+            $status = false;
+        }
+        // ob_start();
+        // var_dump($_COOKIE);
+        // $content = ob_get_contents();
+        // ob_end_clean();
+        // $this->_log("user='$user_id', token='$token', status='$status', COOKIES=" .  $content);
         return $status;
     }
 
@@ -566,16 +578,30 @@ class VkMiniAppController {
             // выбрать заявки по фильтрам
             $requests = $this->_get_registration_requests($filters, 'detail');
             for ($index = 0; $index < count($requests); $index++) {
-                // подбор лицевых счетов в соответствии с заявкой
-                $account = trim($requests[$index]['acc_id']);
-                $db = $this->db_open();
-                $result = $db->query("SELECT * 
-                    FROM `clients` 
-                    WHERE `acc_id_repr` LIKE '%?S%'",
-                    $account);
-                if (!$result) throw new Exception('result of query is false');
-                $requests[$index]['selected_accounts'] = $result->fetch_assoc_array();
-                //print_r($db->getQueryString());
+                if ($requests[$index]['is_approved'] === null) {
+                    // для ожидающих заявок подбор лицевых счетов в соответствии с заявкой
+                    $account = trim($requests[$index]['acc_id']);
+                    $db = $this->db_open();
+                    $result = $db->query("SELECT * 
+                        FROM `clients` 
+                        WHERE `acc_id_repr` LIKE '%?S%'",
+                        $account);
+                    if (!$result) throw new Exception('result of query is false');
+                    $requests[$index]['selected_accounts'] = $result->fetch_assoc_array();
+                    
+                } elseif ((int)$requests[$index]['is_approved'] === 1) {
+                    // для утвержденных заявок выбираем данные привязанного лс
+                    $db = $this->db_open();
+                    $result = $db->query("SELECT * 
+                        FROM `clients` 
+                        WHERE `acc_id` = ?i",
+                        $requests[$index]['linked_acc_id']);
+                    if (!$result) throw new Exception('result of query is false');
+                    $requests[$index]['selected_accounts'] = $result->fetch_assoc_array();
+
+                } else {
+                    $requests[$index]['selected_accounts'] = [];
+                }
             }
             return $requests;
         } catch (Exception $e) {
@@ -652,8 +678,10 @@ class VkMiniAppController {
             // заапрувить заявки
             $result = $this->_db->query("UPDATE `registration_requests`
                  SET `is_approved` = 1, 
+                 `linked_acc_id` = ?i,
                  `processed_by` = ?i
                  WHERE `id` = ?i;",
+                 $option->account_id,
                  $registrator,
                  $request['id']);
 
@@ -1101,5 +1129,14 @@ class VkMiniAppController {
             '+/', '-_'), 
         '='); 
         return $result;
+    }
+
+    private function _get_token_name($app_id) {
+        return "servertokenname_" . $app_id;
+    }
+
+    private function _log($text) {
+        $log = date('Y-m-d H:i:s') . " $text";
+        file_put_contents(__DIR__ . '/log.txt', $log . PHP_EOL, FILE_APPEND);
     }
 }
