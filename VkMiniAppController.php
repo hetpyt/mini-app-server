@@ -783,9 +783,11 @@ class VkMiniAppController {
                     `indications`.`vk_user_id` AS 'vk_user_id',
                     `meters`.`index_num` AS 'meter_code',
                     `meters`.`title` AS 'meter_title',
-                    `meters`.`current_count` AS 'current_count'
+                    `meters`.`current_count` AS 'current_count',
+                    `clients`.`acc_id`
                 FROM `indications`
-                    LEFT JOIN `meters` ON `indications`.`meter_id` = `meters`.`id`";
+                    LEFT JOIN `meters` ON `indications`.`meter_id` = `meters`.`id`
+                    LEFT JOIN `clients` ON `meters`.`acc_id` = `clients`.`acc_id`";
             if (strlen($where_clause)) {
                 $query .= " WHERE " . $where_clause;
             }
