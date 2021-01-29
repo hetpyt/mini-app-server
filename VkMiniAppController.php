@@ -143,8 +143,18 @@ class VkMiniAppController {
             if (property_exists($data, 'options')) $options = $data->options;
 
             switch ($action) {
+                // ---> убрать после перехода на пагинацию списков
                 case "GETALL":
                     //print_r('getall');
+                    $res_data = $this->_get_registration_requests($data->filters, $options);
+                    break;
+                // <---
+                case "COUNT":
+                    $res_data = $this->_get_registration_requests_count($data->filters, $options);
+                    break;
+
+                case "LIST":
+                    //print_r('list');
                     $res_data = $this->_get_registration_requests($data->filters, $options);
                     break;
 
@@ -609,16 +619,53 @@ class VkMiniAppController {
         }
     }
 
+    private function _get_registration_requests_count($filters, $option = null) {
+        try {
+
+            $table_fields = $this->_get_table_info('registration_requests');
+            if ($table_fields === false) throw new Exception('can not fetch data schema');
+
+            $db = $this->db_open();
+            $params = [];
+            $where_clause = $this->_bild_filters($filters, $table_fields, $params);
+
+            $db = $this->db_open();
+
+            $query = "SELECT COUNT(*) FROM `registration_requests` ";
+            if (strlen($where_clause)) {
+                $query .= ' WHERE ' . $where_clause;
+            }
+            $result = $db->queryArguments($query, $params);
+            //print_r($result); echo("\r");
+
+            if ($result === false) throw new Exception('result of query is false');
+            
+            return $result->fetch_row()[0];
+
+        } catch (Exception $e) {
+            throw new Exception('can not count registration requests: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
     private function _get_registration_requests($filters, $option = null) {
         try {
             $select_clause = '*';
+            $limit_clause = '';
+
+            $table_fields = $this->_get_table_info('registration_requests');
+            if ($table_fields === false) throw new Exception('can not fetch data schema');
+
+            $db = $this->db_open();
+            $params = [];
+            $where_clause = $this->_bild_filters($filters, $table_fields, $params);
+            // ---> убрать после перехода на пагинацию списков
             if (is_string($option)) {
                 $option = strtoupper($option);
                 switch ($option) {
                     case 'DETAIL':
                         $select_clause = "*, 
-                        DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
-                        DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'";
+                            DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
+                            DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'";
                         break;
 
                     case 'LIST':
@@ -635,23 +682,56 @@ class VkMiniAppController {
                         break;
 
                 }
+            // <---
+            } elseif (is_array($option)) {
+
+                $this->_check_fields($option, ['view'], [], false);
+
+                $view = strtoupper($option->view);
+                switch ($view) {
+                    case 'LIST':
+                        $select_clause = "
+                            `id`, 
+                            `vk_user_id`, 
+                            `acc_id`, 
+                            DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
+                            DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date', 
+                            `is_approved`, 
+                            `processed_by`, 
+                            `hide_in_app`, 
+                            `del_in_app`";
+
+                        if (property_exists($option, 'page_num') && property_exists($option, 'page_len')) {
+                            $offset = ($option->page_num -1) * $option->page_len;
+                            $limit_clause = $db->prepare(' LIMIT ?i, ?i ', $offset, $option->page_len);
+                        }
+                        break;
+
+                    case 'DETAIL':
+                        $select_clause = "*, 
+                            DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
+                            DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'";
+                        break;
+                }
+
             }
-            $db = $this->db_open();
-
-            $table_fields = $this->_get_table_info('registration_requests');
-            if ($table_fields === false) throw new Exception('can not fetch data schema');
-
-            $params = [];
+            
             $query = "SELECT " . $select_clause . " FROM `registration_requests` ";
-            $where_clause = $this->_bild_filters($filters, $table_fields, $params);
-            //print_r($where_clause);
-            $result = $db->queryArguments($query . (strlen($where_clause) ? ' WHERE ' . $where_clause : ''), $params);
+            if (strlen($where_clause)) {
+                $query .= ' WHERE ' . $where_clause;
+            }
+            if (strlen($limit_clause)) {
+                $query .= ' ' . $limit_clause;
+            }
+            $result = $db->queryArguments($query, $params);
             //print_r($db->getQueryString()); echo("\r");
             if (!$result) throw new Exception('result of query is false');
             return $result->fetch_assoc_array();
 
         } catch (Exception $e) {
             throw new Exception('can not fetch registration requests: ' . $e->getMessage(), 0, $e);
+        } finally {
+
         }
     }
 
