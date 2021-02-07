@@ -91,16 +91,6 @@ class VkMiniAppController {
         print_r($data);
     }
 
-
-// NEW API
-
-    /**
-    * @url GET /regrequests/status
-    */
-    public function regrequests_status() {
-
-
-    }
     /**
     * @url GET /registrationstatus
     */

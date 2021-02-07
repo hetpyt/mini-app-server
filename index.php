@@ -1,7 +1,7 @@
 <?php
 require_once './vendor/autoload.php';
 require_once './config/config.php';
-require_once './VkMiniAppController.php';
+require_once './TestController.php'; //'./VkMiniAppController.php';
 require_once './VKMiniAppAuthServer.php';
 
 use Jacwright\RestServer\RestServer;
@@ -13,7 +13,8 @@ $server = new RestServer($mode);
 if ($mode === 'debug') {
     $server->root = '/api';
 }
-$server->addClass('VkMiniAppController');
+//$server->addClass('VkMiniAppController');
+$server->addClass('TestController');
 $server->setAuthHandler(new VKMiniAppAuthServer);
 $server->handle();
 ?>

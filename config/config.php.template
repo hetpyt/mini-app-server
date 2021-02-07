@@ -7,13 +7,16 @@ $_Config = [
     'db_user' => 'vk_mini_app',
     'db_pass' => 'vk_mini_app_password',
     'db_charset' => 'utf8',
-    // server options
+    // server options (production, debug)
     'server_mode' =>'production',
     // client vk app id
     'vk_app_id' => '',
     // client vk app secret key
     'client_secret' => '',
     // random phrase to generate auth token for clients
-    'server_key' => 'Придумайте случайную строку'
+    'server_key' => 'Придумайте случайную строку',
+    // отключает авторизацию через ВК (если true, то токен передавать не нужно)
+    // должен быть false в продакшене!
+    'no_vk_auth' => false
 ];
 ?>
