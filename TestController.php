@@ -2,13 +2,14 @@
 use Jacwright\RestServer\RestException;
 //use Krugozor\Database\Mysql\Mysql;
 
+require_once 'Messages_RU.php';
 require_once 'DataBase.php';
 
 class TestController
 {
     // ид пользователя, полученный через строку запроса
-    private $_user_id;
-
+    private $_user_id = null;
+    private $_user_priv = null;
     /**
     * @noAuth
     * @url GET /
@@ -64,7 +65,7 @@ class TestController
         }
 
         if ($status) {
-            echo print_r($sign_params);
+            //echo print_r($sign_params);
             // все хорошо, подпись верна
             $auth_key = $this->_hash($this->_token_string($sign_params['vk_user_id'], $sign_params['vk_app_id'], $_Config['server_key']), $_Config['client_secret']);
 
@@ -82,7 +83,10 @@ class TestController
     */
     public function regrequests_get($data) {
         try {
-
+            // проверка на блок и привилегии
+            if (!$this->_user_priv) {
+                return $this->_return_error(__ERR_USER_NO_PRIV);
+            }
             $db_data = DataBase::regrequests_get($this->_user_id);
             return $this->_return_result($db_data);
 
@@ -97,6 +101,10 @@ class TestController
     public function regrequests_add($data) {
         try {
             // так же проверять не привязан ли уже данный лс к данному пользователю
+            // проверка на блок и привилегии
+            if (!$this->_user_priv) {
+                return $this->_return_error(__ERR_USER_NO_PRIV);
+            }
             // проверка наличия данных заявки
             $check_fields = ['registration_data'];
             $this->_check_fields($data, $check_fields, [], false);
@@ -110,27 +118,18 @@ class TestController
 
             // проверка на существование заявки
             if (DataBase::is_regrequest_exists($this->_user_id, $reg_data->acc_id)) {
-                return $this->_return_result([
-                    'error' => 1,
-                    'message' => 'Заявка на регистрацию указанного лицевого счета уже создана. Повторно заявку можно будет подать, после обработки оператором существующей.'
-                ]);
+                return $this->_return_error(__ERR_REGREQ_NOT_UNIQ);
             }
             // проверка секретного кода
             $accounts = DataBase::get_account_by_secret_code($reg_data->secret_code, $reg_data->acc_id);
             if (count($accounts) != 1) {
-                return $this->_return_result([
-                    'error' => 2,
-                    'message' => 'Неверно указан проверочный код или номер лицевого счета.'
-                ]);
+                return $this->_return_error(__ERR_BAD_SECRET_CODE);
             }
 
             // 
             DataBase::regrequests_add($this->_user_id, $reg_data);
 
-            return $this->_return_result([
-                'error' => 1,
-                'message' => 'Заявка создана успешно.'
-            ]);
+            return $this->_return_result(null);
 
         } catch (Exception $e) {
             return $this->_return_error($e->getMessage());
@@ -196,11 +195,8 @@ class TestController
     public function accounts_list($data) {
         try {
             // проверка на блок и привилегии
-            $user_data = DataBase::users_privileges_get($this->_user_id);
-            if (count($user_data)) $user_data = $user_data[0];
-            if ((int)$user_data['is_blocked'] !== 0) {
-                // не отдаем заблокированным пользователям акки
-                return $this->return_result(null);
+            if (!$this->_user_priv) {
+                return $this->_return_error(__ERR_USER_NO_PRIV);
             }
             $db_data = DataBase::accounts_list($this->_user_id);
             
@@ -227,6 +223,7 @@ class TestController
 
     public function authorize() {
         global $_Config;
+        $status = false;
         $user_id = '';
         $token = '';
         // получим токен
@@ -239,17 +236,26 @@ class TestController
         }
         if ($user_id && $token) {
             $expected_token = $this->_hash($this->_token_string($user_id, $_Config['vk_app_id'], $_Config['server_key']), $_Config['client_secret']);
-            $status = $expected_token === $token;
-            if ($status) $this->_user_id = $user_id;
-            else $this->_user_id = null;
-        } else {
-            $status = false;
+            if ($status = $expected_token === $token) {
+                $this->_user_id = $user_id;
+                // привилегии пользователя
+                try {
+                    $db_data = DataBase::users_privileges_get($this->_user_id);
+                } catch (Exception $e) {
+                    return $status;
+                }
+                if (count($db_data)) {
+                    $db_data = $db_data[0];
+                    // проверка на блок пользователя
+                    if ((int)$db_data['is_blocked'] === 0) {
+                        $this->_user_priv = $db_data['privileges'];
+                    }
+                } else {
+                    // не известный пользователь - по умолчанию USER
+                    $this->_user_priv = "USER";
+                }
+            }
         }
-        // ob_start();
-        // var_dump($_COOKIE);
-        // $content = ob_get_contents();
-        // ob_end_clean();
-        // $this->_log("user='$user_id', token='$token', status='$status', COOKIES=" .  $content);
         return $status;
     }
 
@@ -274,8 +280,8 @@ class TestController
             'result' => false,
             'data' => [],
             'error' => [
-                'name' => $name,
-                'message' => $message
+                'name' => is_array($message) ? $message[0] : $name,
+                'message' => is_array($message) ? $message[1] : $message
             ],
             'data_len' => 0
         ];
@@ -312,6 +318,41 @@ class TestController
 
         } else {
             throw new Exception(($context ? "$context. " : "") . "data must been array or object");
+        }
+    }
+
+    private function _check_user_privileges($requested_priv, $ret_if_fail = false) {
+        try {
+            $priv_to_test = [];
+            $requested_priv = strtoupper($requested_priv);
+            switch ($requested_priv) {
+                case 'USER':
+                    array_push($priv_to_test, "USER");
+                case 'OPERATOR':
+                    array_push($priv_to_test, "OPERATOR");
+                case 'ADMIN':
+                    array_push($priv_to_test, "ADMIN");
+                    break;
+                default:
+                    return false;
+            }
+
+            $user_data = DataBase::users_privileges_get($this->_user_id);
+            if (!count($user_data)) {
+                // нет такого пользователя в бд
+                return false;
+            }
+            $user_data = $user_data[0];
+            if ((int)$user_data['is_blocked'] !== 0) {
+                // пользователь заблокирован
+                return false;
+            }
+
+            return in_array($user_data['privileges'], $priv_to_test);
+
+        } catch (Exception $e) {
+            throw new Exception('Can not check user privileges. Reason: ' . $e->getMessage());
+            return false;
         }
     }
 
