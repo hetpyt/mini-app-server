@@ -83,10 +83,6 @@ class TestController
     */
     public function regrequests_get($data) {
         try {
-            // проверка на блок и привилегии
-            if (!$this->_user_priv) {
-                return $this->_return_error(__ERR_USER_NO_PRIV);
-            }
             $db_data = DataBase::regrequests_get($this->_user_id);
             return $this->_return_result($db_data);
 
@@ -211,7 +207,19 @@ class TestController
     * @url POST /meters/get
     */
     public function meters_get($data) {
-
+        try {
+            // проверка на блок и привилегии
+            if (!$this->_user_priv) {
+                return $this->_return_error(__ERR_USER_NO_PRIV);
+            }
+            $check_fields = ['account_id'];
+            $check_int_fields = ['account_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+            // проверка аккаунта на принадлежность пользователю
+            
+        } catch (Exception $e) {
+            return $this->_return_error($e->getMessage());
+        }
     }
 
     /**
