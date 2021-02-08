@@ -118,25 +118,26 @@ class DataBase {
 
     // /accounts
 
-    public static function accounts_get($vk_user_id, $filters = null) {
+    public static function accounts_detail($vk_user_id, $acc_id) {
         try {
             $db = self::db_open();
             $data = null;
-            $result = $db->query(
-                "SELECT 
-                    `vk_users`.`vk_user_id`,
-                    `clients`.`acc_id`, 
-                    `clients`.`acc_id_repr`, 
-                    `clients`.`tenant_repr`, 
-                    `clients`.`address_repr`
+
+            $result = $db->query("SELECT 
+                `vk_users`.`vk_user_id`,
+                `clients`.`acc_id`, 
+                `clients`.`acc_id_repr`, 
+                `clients`.`tenant_repr`, 
+                `clients`.`address_repr`
                 FROM `vk_users` 
                 LEFT JOIN `accounts` ON `accounts`.`vk_user_id` = `vk_users`.`vk_user_id`
                 LEFT JOIN `clients` ON `clients`.`acc_id` = `accounts`.`acc_id`
-                WHERE `vk_users`.`vk_user_id` = ?i AND `clients`.`acc_id` IS NOT NULL;", 
-            $vk_user_id);
+                WHERE `vk_users`.`vk_user_id` = ?i AND `clients`.`acc_id` = ?i",
+            $vk_user_id, 
+            $acc_id);
 
             if ($result->getNumRows() != 0) {
-                $data = $result->fetch_assoc_array();
+                $data = $result->fetch_assoc_array()[0];
             }
             return $data;
 
@@ -683,7 +684,10 @@ class DataBase {
                 WHERE `TABLE_NAME` = '?s' AND `TABLE_SCHEMA` = DATABASE();",
             $table_name);
 
-            return $result->fetch_assoc_array();
+            $data = $result->fetch_assoc_array();
+            if (!count($data)) throw new Exception('can not retrieve data schema: bad table name', 0, $e);
+
+            return $data;
 
         } catch (Exception $e) {
             throw new Exception('can not retrieve data schema: '.$e->getMessage(), 0, $e);

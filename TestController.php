@@ -119,7 +119,7 @@ class TestController
             // проверка секретного кода
             $accounts = DataBase::get_account_by_secret_code($reg_data->secret_code, $reg_data->acc_id);
             if (count($accounts) != 1) {
-                return $this->_return_error(__ERR_BAD_SECRET_CODE);
+                return $this->_return_error(__ERR_ACC_BAD_SECRET_CODE);
             }
 
             // 
@@ -216,7 +216,14 @@ class TestController
             $check_int_fields = ['account_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
             // проверка аккаунта на принадлежность пользователю
-            
+            if (DataBase::accounts_detail($this->_user_id, $data->account_id) === null) {
+                return $this->_return_error(__ERR_ACC_NOT_OWNED);
+            }
+
+            // получение данных по счетчикам
+            $db_data = DataBase::meters_get($this->_user_id, $data->account_id);
+            return $this->_return_result($db_data);
+
         } catch (Exception $e) {
             return $this->_return_error($e->getMessage());
         }
@@ -234,6 +241,7 @@ class TestController
         $status = false;
         $user_id = '';
         $token = '';
+
         // получим токен
         if (array_key_exists('token', $_GET)) {
             $token = $_GET['token'];
@@ -288,6 +296,7 @@ class TestController
             'result' => false,
             'data' => [],
             'error' => [
+                'code' => -1,
                 'name' => is_array($message) ? $message[0] : $name,
                 'message' => is_array($message) ? $message[1] : $message
             ],

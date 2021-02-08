@@ -1,21 +1,17 @@
 <?php
 
 class QueryBuilder {
-    private $_query = '';
-    private $condition = '';
+    private static $_query = '';
+    private static $condition = '';
 
-    private function __construct() {
-
-    }
-
-    private function _is_values_array_contents_null($values) {
+    private static function _is_values_array_contents_null($values) {
         foreach ($values as $value) {
             if ( is_null($value) || (is_string($value) && strtoupper($value) === "NULL") ) return true;
         }
         return false;
     }
 
-    private function _build_date_condition($field, $value, $data_type, &$params) {
+    private static function _build_date_condition($field, $value, $data_type, &$params) {
         $condition = '';
 
         if (is_array($value)) {
@@ -50,7 +46,7 @@ class QueryBuilder {
         return $condition;
     }
 
-    private function _build_condition($field, $value, $data_type, &$params) {
+    private static function _build_condition($field, $value, $data_type, &$params) {
         $condition = '';
         if ( is_null($value) || (is_string($value) && strtoupper($value) === "NULL") ) {
             $condition = " `$field` IS NULL ";
@@ -60,7 +56,7 @@ class QueryBuilder {
             if (!count($value)) {
                 // пустой массив - условие ложно
                 $condition = " FALSE ";
-            } elseif ($this->_is_values_array_contents_null($value)) {
+            } elseif (self::_is_values_array_contents_null($value)) {
                 foreach ($value as $value_item) {
                     $condition .= (strlen($condition) ? " OR " : "") . self::_build_condition($field, $value_item, $data_type, $params);
                 }
@@ -79,7 +75,7 @@ class QueryBuilder {
         return $condition;
     }
 
-    private function _bild_filters($filters, $table_fields, &$params) {
+    private static function _bild_filters($filters, $table_fields, &$params) {
         
         $where_clause = '';
         if (is_array($filters)) {
