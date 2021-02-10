@@ -233,7 +233,42 @@ class TestController
     * @url POST /meters/indications/add
     */
     public function meters_indications_add($data) {
+        try {
+            // проверка на блок и привилегии
+            if (!$this->_user_priv) {
+                return $this->_return_error(__ERR_USER_NO_PRIV);
+            }
+            $check_fields = ['meters'];
+            $check_int_fields = [];
+            $this->_check_fields($data, $check_fields, $check_int_fields, true);
 
+            $meters = $data->meters;
+            if (!is_array($meters)) throw new Exception('bad meters data');
+
+            if (count($meters) > 0) {
+                $check_fields = ['meter_id', 'new_count'];
+                $check_int_fields = ['meter_id'];
+        
+                $this->_check_fields($meters, $check_fields, $check_int_fields, false);
+
+                $rows_inserted = 0;
+
+                $db = $this->db_open();
+
+                $query = "INSERT 
+                INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
+                VALUES ";
+                foreach($meters as $meter) {
+                    $query .= ($rows_inserted ? ',' : '').(is_numeric($meter->new_count) 
+                        ? $db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $this->_user_id) 
+                        : $db->prepare("(?i, NULL, ?i)", $meter->meter_id, $this->_user_id));
+                    $rows_inserted++;
+                }
+                //throw new Exception($query);
+                if ($rows_inserted) $result = $db->query($query);
+        } catch (Exception $e) {
+            return $this->_return_error($e->getMessage());
+        }
     }
 
     public function authorize() {
