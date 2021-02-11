@@ -1,5 +1,7 @@
 <?php
 use Krugozor\Database\Mysql\Mysql;
+require_once 'InternalException.php';
+
 class DataBase {
 
     private static $clear_allowed_tables = ['clients', 'meters', 'indications'];
@@ -32,7 +34,7 @@ class DataBase {
             return $data;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': ' . $e->getMessage());//, 0, $e);
         }
     }
 
@@ -55,7 +57,7 @@ class DataBase {
             return null;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -71,7 +73,7 @@ class DataBase {
             return null;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -87,7 +89,7 @@ class DataBase {
             return null;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -107,12 +109,20 @@ class DataBase {
                 $vk_user_id);
 
             if ($result->getNumRows() != 0) {
-                $data = $result->fetch_assoc_array();
+                $data = $result->fetch_assoc_array()[0];
+                if ($data['is_blocked']) $data['privileges'] = '';
+            } else {
+                // незарегистрированный пользователь - по умолчанию USER
+                $data = [
+                    'vk_user_id' => $vk_user_id,
+                    'is_blocked' => 0,
+                    'privileges' => 'USER'
+                ];
             }
             return $data;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -142,7 +152,7 @@ class DataBase {
             return $data;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -169,7 +179,7 @@ class DataBase {
             return $data;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -208,7 +218,7 @@ class DataBase {
             return $data;  
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -222,7 +232,7 @@ class DataBase {
             $query = "INSERT 
                 INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
                 VALUES ";
-            foreach($meters as $meter) {
+            foreach ($meters as $meter) {
                 $query .= ($rows_inserted ? ',' : '').(is_numeric($meter->new_count) 
                     ? $db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $vk_user_id) 
                     : $db->prepare("(?i, NULL, ?i)", $meter->meter_id, $vk_user_id));
@@ -233,7 +243,7 @@ class DataBase {
             return null;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -255,7 +265,7 @@ class DataBase {
                 `del_in_app`";
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -268,7 +278,7 @@ class DataBase {
                 DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'";
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
     
@@ -278,7 +288,7 @@ class DataBase {
             $db->getMysqli()->begin_transaction(); //(MYSQLI_TRANS_START_READ_WRITE);
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
 
         try {
@@ -300,7 +310,7 @@ class DataBase {
 
         } catch (Exception $e) {
             $db->getMysqli()->rollback();
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -318,7 +328,7 @@ class DataBase {
                 $request['id']);
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -331,7 +341,7 @@ class DataBase {
             $db->getMysqli()->begin_transaction(); //(MYSQLI_TRANS_START_READ_WRITE);
             
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
 
         try {
@@ -387,7 +397,7 @@ class DataBase {
 
         } catch (Exception $e) {
             $db->getMysqli()->rollback();
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -395,7 +405,7 @@ class DataBase {
 
     public static function admin_indications_get($period_begin = null, $period_end = null) {
         try {
-            if (!is_object($data_params)) throw new Exception("data_params is not object");
+            if (!is_object($data_params)) throw new InternalException("data_params is not object");
             $where_clause = "";
             $params = [];
             if (is_string($period_begin) && strlen($period_begin)) {
@@ -429,7 +439,7 @@ class DataBase {
             return $result->fetch_assoc_array();
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -452,7 +462,7 @@ class DataBase {
             return $data;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -477,7 +487,7 @@ class DataBase {
             return false;
 
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 

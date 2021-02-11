@@ -1,7 +1,7 @@
 <?php
 use Jacwright\RestServer\RestException;
 //use Krugozor\Database\Mysql\Mysql;
-
+require_once 'InternalException.php';
 require_once 'Messages_RU.php';
 require_once 'DataBase.php';
 
@@ -84,23 +84,21 @@ class TestController
     public function regrequests_get($data) {
         try {
             $db_data = DataBase::regrequests_get($this->_user_id);
-            return $this->_return_result($db_data);
-
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
-        }
+        } catch (InternalException $e) {$this->_handle_error(500);}
+        return $db_data;
     }
 
     /**
     * @url POST /regrequests/add
     */
     public function regrequests_add($data) {
+        // так же проверять не привязан ли уже данный лс к данному пользователю
+        // проверка на блок и привилегии
+        if (!$this->_user_priv) {
+            $this->_handle_error(403);
+        }
+
         try {
-            // так же проверять не привязан ли уже данный лс к данному пользователю
-            // проверка на блок и привилегии
-            if (!$this->_user_priv) {
-                return $this->_return_error(__ERR_USER_NO_PRIV);
-            }
             // проверка наличия данных заявки
             $check_fields = ['registration_data'];
             $this->_check_fields($data, $check_fields, [], false);
@@ -110,26 +108,26 @@ class TestController
             $check_fields = ['acc_id', 'surname', 'first_name', 'patronymic', 'street', 'n_dom', 'n_kv', 'secret_code'];
             $check_int_fields = ['secret_code'];
             $this->_check_fields($reg_data, $check_fields, $check_int_fields, true);
-            // проверка существования связи???
+        } catch (InternalException $e) {
+            $this->_handle_error(400);
+        }
+        // проверка существования связи???
 
+        try {
             // проверка на существование заявки
             if (DataBase::is_regrequest_exists($this->_user_id, $reg_data->acc_id)) {
-                return $this->_return_error(__ERR_REGREQ_NOT_UNIQ);
+                $this->_handle_error(409);
             }
             // проверка секретного кода
             $accounts = DataBase::get_account_by_secret_code($reg_data->secret_code, $reg_data->acc_id);
             if (count($accounts) != 1) {
-                return $this->_return_error(__ERR_ACC_BAD_SECRET_CODE);
+                $this->_handle_error(403);
             }
-
             // 
             DataBase::regrequests_add($this->_user_id, $reg_data);
+        } catch (InternalException $e) {$this->_handle_error(500);}
 
-            return $this->_return_result(null);
-
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
-        }
+        return;
     }
 
     /**
@@ -140,12 +138,16 @@ class TestController
             $check_fields = ['request_id'];
             $check_int_fields = ['request_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
+        } catch (InternalException $e) {
+            $this->_handle_error(400);
+        }
 
+        try {
             DataBase::regrequests_hide($this->_user_id, $data['request_id']);
 
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
-        }
+        } catch (InternalException $e) {$this->_handle_error(500);}
+        
+        return;
     }
 
     /**
@@ -156,12 +158,16 @@ class TestController
             $check_fields = ['request_id'];
             $check_int_fields = ['request_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
-
+        } catch (InternalException $e) {
+            $this->_handle_error(400);
+        }
+        
+        try {
             DataBase::regrequests_del($this->_user_id, $data['request_id']);
             
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
-        }
+        } catch (InternalException $e) {$this->_handle_error(500);}
+
+        return;
     }
 
     /**
@@ -170,105 +176,92 @@ class TestController
     public function users_privileges_get($data) {
         try {
             $db_data = DataBase::users_privileges_get($this->_user_id);
-            if (count($db_data)) $db_data = $db_data[0];
-            // проверка на блок пользователя
-            if ((int)$db_data['is_blocked'] !== 0) {
-                // не разрешаем передавать показания и выполнять какие либо действия
-                // сброс полномочий, если они есть
-                $db_data['privileges'] = '';
-            }
-            
-            return $this->_return_result([$db_data]);
+        } catch (InternalException $e) {$this->_handle_error(500);}
 
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
-        }
+        return $db_data;
     }
 
     /**
     * @url POST /accounts/list
     */
     public function accounts_list($data) {
-        try {
-            // проверка на блок и привилегии
-            if (!$this->_user_priv) {
-                return $this->_return_error(__ERR_USER_NO_PRIV);
-            }
-            $db_data = DataBase::accounts_list($this->_user_id);
-            
-            return $this->_return_result($db_data);
-
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
+        // проверка на блок и привилегии
+        if (!$this->_user_priv) {
+            $this->_handle_error(403);
         }
+        try {
+            $db_data = DataBase::accounts_list($this->_user_id);
+        } catch (InternalException $e) {$this->_handle_error(500);}
+            
+        return $db_data;
     }
     
     /**
     * @url POST /meters/get
     */
     public function meters_get($data) {
+        // проверка на блок и привилегии
+        if (!$this->_user_priv) {
+            $this->_handle_error(403);
+        }
         try {
-            // проверка на блок и привилегии
-            if (!$this->_user_priv) {
-                return $this->_return_error(__ERR_USER_NO_PRIV);
-            }
             $check_fields = ['account_id'];
             $check_int_fields = ['account_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
-            // проверка аккаунта на принадлежность пользователю
+        } catch (InternalException $e) {
+            $this->_handle_error(400);
+        }
+        // проверка аккаунта на принадлежность пользователю
+        try {
             if (DataBase::accounts_detail($this->_user_id, $data->account_id) === null) {
-                return $this->_return_error(__ERR_ACC_NOT_OWNED);
+                $this->_handle_error(403);
             }
-
             // получение данных по счетчикам
             $db_data = DataBase::meters_get($this->_user_id, $data->account_id);
-            return $this->_return_result($db_data);
-
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
-        }
+        } catch (InternalException $e) {$this->_handle_error(500);}
+        
+        return $db_data;
     }
 
     /**
     * @url POST /meters/indications/add
     */
     public function meters_indications_add($data) {
+        // проверка на блок и привилегии
+        if (!$this->_user_priv) {
+            $this->_handle_error(403);
+        }
         try {
-            // проверка на блок и привилегии
-            if (!$this->_user_priv) {
-                return $this->_return_error(__ERR_USER_NO_PRIV);
-            }
             $check_fields = ['meters'];
             $check_int_fields = [];
             $this->_check_fields($data, $check_fields, $check_int_fields, true);
 
             $meters = $data->meters;
-            if (!is_array($meters)) throw new Exception('bad meters data');
+            if (!is_array($meters)) throw new InternalException('bad meters data');
 
-            if (count($meters) > 0) {
+        } catch (InternalException $e) {
+            $this->_handle_error(400);
+        }
+
+        if (count($meters) > 0) {
+            try {
                 $check_fields = ['meter_id', 'new_count'];
                 $check_int_fields = ['meter_id'];
-        
                 $this->_check_fields($meters, $check_fields, $check_int_fields, false);
+            } catch (InternalException $e) {
+                $this->_handle_error(400);
+            }
 
-                $rows_inserted = 0;
+            // !!! проверка принадлежности счетчиков
 
-                $db = $this->db_open();
-
-                $query = "INSERT 
-                INTO `indications` (`meter_id`, `count`, `vk_user_id`) 
-                VALUES ";
-                foreach($meters as $meter) {
-                    $query .= ($rows_inserted ? ',' : '').(is_numeric($meter->new_count) 
-                        ? $db->prepare("(?i, ?i, ?i)", $meter->meter_id, $meter->new_count, $this->_user_id) 
-                        : $db->prepare("(?i, NULL, ?i)", $meter->meter_id, $this->_user_id));
-                    $rows_inserted++;
-                }
-                //throw new Exception($query);
-                if ($rows_inserted) $result = $db->query($query);
-        } catch (Exception $e) {
-            return $this->_return_error($e->getMessage());
+            try {
+                DataBase::meters_indications_add($this->_user_id, $meters);
+            } catch (InternalException $e) {
+                $this->_handle_error(500);
+            }
         }
+
+        return;
     }
 
     public function authorize() {
@@ -292,52 +285,18 @@ class TestController
                 // привилегии пользователя
                 try {
                     $db_data = DataBase::users_privileges_get($this->_user_id);
-                } catch (Exception $e) {
+                } catch (InternalException $e) {
                     return $status;
                 }
-                if (count($db_data)) {
-                    $db_data = $db_data[0];
-                    // проверка на блок пользователя
-                    if ((int)$db_data['is_blocked'] === 0) {
-                        $this->_user_priv = $db_data['privileges'];
-                    }
-                } else {
-                    // не известный пользователь - по умолчанию USER
-                    $this->_user_priv = "USER";
-                }
+                $this->_user_priv = $db_data['privileges'];
             }
         }
         return $status;
     }
 
-    private function _return_result($data) {
-        $ret_data = [
-            'result' => true,
-            'data' => [],
-            'data_len' => 0
-        ];
-        if ($data !== null) {
-            if (is_array($data) && !$this->_is_assoc($data)) 
-                $ret_data['data'] = $data;
-            else
-                array_push($ret_data['data'], $data);
-        }
-        $ret_data['data_len'] = count($ret_data['data']);
-        return  $ret_data;
-    }
-
-    private function _return_error($message, $name = '') {
-        $ret_data = [
-            'result' => false,
-            'data' => [],
-            'error' => [
-                'code' => -1,
-                'name' => is_array($message) ? $message[0] : $name,
-                'message' => is_array($message) ? $message[1] : $message
-            ],
-            'data_len' => 0
-        ];
-        return  $ret_data;
+    private function _handle_error($code = null, $message = null) {
+        if ($code === null) $code = 500;
+        throw new RestException($code, $message);
     }
 
     private function _check_fields(&$data, $fields, $int_fields, $set_zero = true, $context = null) {
@@ -346,7 +305,7 @@ class TestController
                 $this->_check_fields($dataItem, $fields, $int_fields, $set_zero);
             }
 
-        } else if (is_object($data) || (is_array($data) && $this->_is_assoc($data))) {
+        } else if (is_object($data) || $this->_is_assoc($data)) {
             $is_obj = is_object($data);
             foreach ($fields as $field) {
                 if ($is_obj) {
@@ -373,42 +332,8 @@ class TestController
         }
     }
 
-    private function _check_user_privileges($requested_priv, $ret_if_fail = false) {
-        try {
-            $priv_to_test = [];
-            $requested_priv = strtoupper($requested_priv);
-            switch ($requested_priv) {
-                case 'USER':
-                    array_push($priv_to_test, "USER");
-                case 'OPERATOR':
-                    array_push($priv_to_test, "OPERATOR");
-                case 'ADMIN':
-                    array_push($priv_to_test, "ADMIN");
-                    break;
-                default:
-                    return false;
-            }
-
-            $user_data = DataBase::users_privileges_get($this->_user_id);
-            if (!count($user_data)) {
-                // нет такого пользователя в бд
-                return false;
-            }
-            $user_data = $user_data[0];
-            if ((int)$user_data['is_blocked'] !== 0) {
-                // пользователь заблокирован
-                return false;
-            }
-
-            return in_array($user_data['privileges'], $priv_to_test);
-
-        } catch (Exception $e) {
-            throw new Exception('Can not check user privileges. Reason: ' . $e->getMessage());
-            return false;
-        }
-    }
-
     private function _is_assoc($array) {
+        if (!is_array($array)) return false;
         foreach (array_keys($array) as $k => $v) {
             if ($k !== $v) return true;
         }
