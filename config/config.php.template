@@ -13,6 +13,9 @@ $_Config = [
     'vk_app_id' => '',
     // client vk app secret key
     'client_secret' => '',
+    // имя переменной, в которую будет передан токен авторизации (используется в клиентском приложении)
+    // в конец имени будет добавлен идентификатор приложения (vk_app_id)
+    'server_token_name' => 'servertokenname_',
     // random phrase to generate auth token for clients
     'server_key' => 'Придумайте случайную строку',
     // отключает авторизацию через ВК (если true, то токен передавать не нужно)

@@ -29,9 +29,9 @@ class DataBase {
             $vk_user_id);
 
             if ($result->getNumRows() != 0) {
-                $data = $result->fetch_assoc_array();
+                return $result->fetch_assoc_array();
             }
-            return $data;
+            return [];
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': ' . $e->getMessage());//, 0, $e);
@@ -174,9 +174,9 @@ class DataBase {
             $vk_user_id);
 
             if ($result->getNumRows() != 0) {
-                $data = $result->fetch_assoc_array();
+                return $result->fetch_assoc_array();
             }
-            return $data;
+            return [];
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
@@ -185,7 +185,7 @@ class DataBase {
 
     // /meters
 
-    public static function meters_get($vk_user_id, $acc_id) {
+    public static function meters_list($vk_user_id, $acc_id) {
         try {
             $db = self::db_open();
             $data = null;
@@ -213,18 +213,18 @@ class DataBase {
             WHERE `meters`.`acc_id` = '?i';", $acc_id);
 
             if ($result->getNumRows() != 0) {
-                $data = $result->fetch_assoc_array();
+                return $result->fetch_assoc_array();
             }  
-            return $data;  
+            return [];  
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
-    // /meters/indications
+    // /indications
 
-    public static function meters_indications_add($vk_user_id, $meters) {
+    public static function indications_add($vk_user_id, $meters) {
         try {
             $db = self::db_open();
             $rows_inserted = 0;
@@ -249,23 +249,37 @@ class DataBase {
 
     // /admin/regrequests
 
-    public static function admin_regrequests_list($vk_user_id) {
+    public static function admin_regrequests_list($filters = null) {
         try {
             $db = self::db_open();
-
-            $select_clause = "
+            $table_name = 'registration_requests';
+            $select_clause = "SELECT 
                 `id`, 
                 `vk_user_id`, 
                 `acc_id`, 
                 DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
                 DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date', 
                 `is_approved`, 
+                `linked_acc_id`, 
                 `processed_by`, 
                 `hide_in_app`, 
                 `del_in_app`";
 
+            $from_clause = "FROM `$table_name`";
+            $where_clause = "";
+            $params = [];
+            if ($filters) {
+                $where_clause = self::_build_filters($filters, self::_get_table_info($db, $table_name), $params);
+            }
+
+            $result = $db->query($select_clause . " " . $from_clause . " " . ($where_clause ? "WHERE $where_clause" : ""));
+            if ($result->getNumRows() != 0) {
+                return $result->fetch_assoc_array();
+            }  
+            return [];  
+            
         } catch (Exception $e) {
-            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -493,6 +507,19 @@ class DataBase {
 
     // filters build functions
 
+    private static function _str_to_date($date_str, $set_time = null) {
+        try {
+            $dt = date_create($date_str);
+            if (is_array($set_time)) date_time_set($dt, $set_time['hour'], $set_time['minute'], $set_time['second']);
+            $result = date_format($dt, "Y-m-d H:i:s");
+            if ($result === false) throw new Exception("not valid date string '$date_str'");
+            return $result;
+
+        } catch (Exception $e) {
+            throw new InternalException("can not convert string '$date_str' to Date: " . $e->getMessage(), 0, $e);
+        }
+    }
+
     private static function _is_values_array_contents_null($values) {
         foreach ($values as $value) {
             if ( is_null($value) || (is_string($value) && strtoupper($value) === "NULL") ) return true;
@@ -511,17 +538,17 @@ class DataBase {
             } elseif ($len == 1) {
                 // один элемент
                 $condition = " DATE(`$field`) = '?s' ";
-                $params[] = $this->_str_to_date($value[0]);
+                $params[] = self::_str_to_date($value[0]);
             } else {
                 // в массиве две даты: меньшая - начало периода, большая - конец периода
                 sort($value);
                 $condition = " `$field` BETWEEN '?s' AND '?s' ";
-                $params[] = $this->_str_to_date($value[0], [
+                $params[] = self::_str_to_date($value[0], [
                     "hour" => 0,
                     "minute" => 0,
                     "second" => 0
                 ]);
-                $params[] = $this->_str_to_date($value[$len - 1], [
+                $params[] = self::_str_to_date($value[$len - 1], [
                     "hour" => 23,
                     "minute" => 59,
                     "second" => 59
@@ -530,7 +557,7 @@ class DataBase {
         } else {
             // одна дата: делаем выборку за день
             $condition = " DATE(`$field`) = '?s' ";
-            $params[] = $this->_str_to_date($value);
+            $params[] = self::_str_to_date($value);
         }
         return $condition;
     }
@@ -545,7 +572,7 @@ class DataBase {
             if (!count($value)) {
                 // пустой массив - условие ложно
                 $condition = " FALSE ";
-            } elseif ($this->_is_values_array_contents_null($value)) {
+            } elseif (self::_is_values_array_contents_null($value)) {
                 foreach ($value as $value_item) {
                     $condition .= (strlen($condition) ? " OR " : "") . self::_build_condition($field, $value_item, $data_type, $params);
                 }
@@ -564,13 +591,13 @@ class DataBase {
         return $condition;
     }
 
-    private static function _bild_filters($filters, $table_fields, &$params) {
+    private static function _build_filters($filters, $table_fields, &$params) {
         
         $where_clause = '';
         if (is_array($filters)) {
             foreach ($filters as $filter) {
                 $key = array_search($filter->field, array_column($table_fields, 'COLUMN_NAME'));
-                if ($key === false) throw new Exception("bad table field name '$filter->field'");
+                if ($key === false) throw new InternalException("bad table field name '$filter->field'");
                 $data_type = strtoupper($table_fields[$key]['DATA_TYPE']);
 
                 $where_clause .= (strlen($where_clause) ? " AND " : "")
@@ -581,7 +608,6 @@ class DataBase {
         }
         return $where_clause;
     }
-
 
     // open db connection
 
