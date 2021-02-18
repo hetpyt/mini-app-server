@@ -128,7 +128,7 @@ class DataBase {
 
     // /accounts
 
-    public static function accounts_detail($vk_user_id, $acc_id) {
+    public static function accounts_get($vk_user_id, $acc_id) {
         try {
             $db = self::db_open();
             $data = null;
@@ -249,7 +249,7 @@ class DataBase {
 
     // /admin/regrequests
 
-    public static function admin_regrequests_list($filters = null) {
+    public static function admin_regrequests_list($filters = null, $limits = null) {
         try {
             $db = self::db_open();
             $table_name = 'registration_requests';
@@ -267,29 +267,47 @@ class DataBase {
 
             $from_clause = "FROM `$table_name`";
             $where_clause = "";
+            $limit_clause = "";
+
             $params = [];
             if ($filters) {
                 $where_clause = self::_build_filters($filters, self::_get_table_info($db, $table_name), $params);
             }
-
-            $result = $db->query($select_clause . " " . $from_clause . " " . ($where_clause ? "WHERE $where_clause" : ""));
+            if ($limits) {
+                $limit_clause = self::_build_limits($limits, $params);
+            }
+            $result = $db->queryArguments(
+                $select_clause . " " . 
+                $from_clause . " " . 
+                ($where_clause ? "WHERE $where_clause" : "") . " " .
+                $limit_clause,
+                $params);
             if ($result->getNumRows() != 0) {
                 return $result->fetch_assoc_array();
             }  
             return [];  
             
         } catch (Exception $e) {
-            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
 
-    public static function admin_regrequests_detail($vk_user_id) {
+    public static function admin_regrequests_get($regrequest_id) {
+        $data = null;
+
         try {
             $db = self::db_open();
 
-            $select_clause = "*, 
+            $result = $db->query("SELECT *, 
                 DATE_FORMAT(`request_date`, '%d.%m.%Y') AS 'request_date', 
-                DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'";
+                DATE_FORMAT(`update_date`, '%d.%m.%Y') AS 'update_date'
+                FROM `registration_requests`
+                WHERE `registration_requests`.`id` = ?i;",
+                $regrequest_id);
+            if ($result->getNumRows() != 0) {
+                $data = $result->fetch_assoc_array()[0];
+            }  
+            return $data;
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
@@ -459,18 +477,24 @@ class DataBase {
 
     // support functions 
 
-    public static function get_account_by_secret_code($secret_code, $acc_id_repr) {
+    public static function get_account_by_repr($acc_id_repr, $secret_code = null) {
         try {
             $db = self::db_open();
+            $params = [];
+            array_push($params, $acc_id_repr);
 
-            $result = $db->query("
-            SELECT 
+            $query = "SELECT 
                 `acc_id`, 
                 `secret_code` 
-            FROM `clients` 
-            WHERE `secret_code` = ?i AND `acc_id_repr` LIKE '%?S%'",
-            $secret_code,
-            $acc_id_repr);
+                FROM `clients` 
+                WHERE `acc_id_repr` LIKE '%?S%'";
+            
+            if ($secret_code) {
+                $query .= " AND `secret_code` = ?i";
+                array_push($params, $secret_code);
+            }
+
+            $result = $db->queryArguments($query, $params);
 
             $data = $result->fetch_assoc_array();
             return $data;
@@ -609,6 +633,12 @@ class DataBase {
         return $where_clause;
     }
 
+    private static function _build_limits($limits, &$params) {
+        $limit_clause = 'LIMIT ?i, ?i';
+        array_push($params, $limits[0], $limits[1]);
+        return $limit_clause;
+    }
+    
     // open db connection
 
     private static function db_open() {

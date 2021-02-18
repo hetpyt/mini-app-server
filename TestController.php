@@ -3,14 +3,16 @@ use Jacwright\RestServer\RestException;
 //use Krugozor\Database\Mysql\Mysql;
 require_once 'Common.php';
 require_once 'InternalException.php';
-require_once 'Messages_RU.php';
+require_once 'Logger.php';
 require_once 'DataBase.php';
 
 class TestController
 {
+    private $_logger = null;
     // ид пользователя, полученный через строку запроса
     private $_user_id = null;
     private $_user_priv = null;
+
     /**
     * @noAuth
     * @url GET /
@@ -22,7 +24,7 @@ class TestController
             $this->_check_config($_Config);
         } catch (Exception $e) {
             //echo 'invalid config: ' . $e->getMessage();
-            $this->_handle_error(500);
+            $this->_handle_error(500, $e);
             return;
         }
 
@@ -41,7 +43,7 @@ class TestController
                 $this->_check_fields($sign_params, $check_fields, [], true);
             } catch (Exception $e) {
                 //echo 'invalid request';
-                $this->_handle_error(403);
+                $this->_handle_error(403, $e);
                 return;
             }
 
@@ -89,7 +91,7 @@ class TestController
     public function regrequests_get($data) {
         try {
             $db_data = DataBase::regrequests_get($this->_user_id);
-        } catch (InternalException $e) {$this->_handle_error(500);}
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
         return $db_data;
     }
 
@@ -114,7 +116,7 @@ class TestController
             $check_int_fields = ['secret_code'];
             $this->_check_fields($reg_data, $check_fields, $check_int_fields, true);
         } catch (InternalException $e) {
-            $this->_handle_error(400);
+            $this->_handle_error(400, $e);
         }
         // проверка существования связи???
 
@@ -124,13 +126,16 @@ class TestController
                 $this->_handle_error(409);
             }
             // проверка секретного кода
-            $accounts = DataBase::get_account_by_secret_code($reg_data->secret_code, $reg_data->acc_id);
+            if (!$reg_data->secret_code) {
+                $this->_handle_error(400);
+            }
+            $accounts = DataBase::get_account_by_repr($reg_data->acc_id, $reg_data->secret_code);
             if (count($accounts) != 1) {
                 $this->_handle_error(403);
             }
             // 
             DataBase::regrequests_add($this->_user_id, $reg_data);
-        } catch (InternalException $e) {$this->_handle_error(500);}
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
 
         return;
     }
@@ -144,13 +149,13 @@ class TestController
             $check_int_fields = ['request_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
         } catch (InternalException $e) {
-            $this->_handle_error(400);
+            $this->_handle_error(400, $e);
         }
 
         try {
             DataBase::regrequests_hide($this->_user_id, $data['request_id']);
 
-        } catch (InternalException $e) {$this->_handle_error(500);}
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
         
         return;
     }
@@ -164,13 +169,13 @@ class TestController
             $check_int_fields = ['request_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
         } catch (InternalException $e) {
-            $this->_handle_error(400);
+            $this->_handle_error(400, $e);
         }
         
         try {
             DataBase::regrequests_del($this->_user_id, $data['request_id']);
             
-        } catch (InternalException $e) {$this->_handle_error(500);}
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
 
         return;
     }
@@ -182,7 +187,7 @@ class TestController
     public function users_privileges_get($data) {
         try {
             $db_data = DataBase::users_privileges_get($this->_user_id);
-        } catch (InternalException $e) {$this->_handle_error(500);}
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
 
         return $db_data;
     }
@@ -198,7 +203,7 @@ class TestController
         }
         try {
             $db_data = DataBase::accounts_list($this->_user_id);
-        } catch (InternalException $e) {$this->_handle_error(500);}
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
             
         return $db_data;
     }
@@ -216,17 +221,17 @@ class TestController
             $check_int_fields = ['account_id'];
             $this->_check_fields($data, $check_fields, $check_int_fields, false);
         } catch (InternalException $e) {
-            $this->_handle_error(400);
+            $this->_handle_error(400, $e);
         }
         // проверка аккаунта на принадлежность пользователю
         try {
-            if (DataBase::accounts_detail($this->_user_id, $data->account_id) === null) {
+            if (DataBase::accounts_get($this->_user_id, $data->account_id) === null) {
                 $this->_handle_error(403);
             }
             // получение данных по счетчикам
             $db_data = DataBase::meters_list($this->_user_id, $data->account_id);
         } catch (InternalException $e) {
-            $this->_handle_error(500);
+            $this->_handle_error(500, $e);
         }
         
         return $db_data;
@@ -249,7 +254,7 @@ class TestController
             if (!is_array($meters)) throw new InternalException('bad meters data');
 
         } catch (InternalException $e) {
-            $this->_handle_error(400);
+            $this->_handle_error(400, $e);
         }
 
         if (count($meters) > 0) {
@@ -258,7 +263,7 @@ class TestController
                 $check_int_fields = ['meter_id'];
                 $this->_check_fields($meters, $check_fields, $check_int_fields, false);
             } catch (InternalException $e) {
-                $this->_handle_error(400);
+                $this->_handle_error(400, $e);
             }
 
             // проверка принадлежности счетчиков
@@ -271,7 +276,7 @@ class TestController
             try {
                 DataBase::indications_add($this->_user_id, $meters);
             } catch (InternalException $e) {
-                $this->_handle_error(500);
+                $this->_handle_error(500, $e);
             }
         }
 
@@ -286,10 +291,32 @@ class TestController
             $this->_handle_error(403);
         }
         $filters = null;
+        $limits = null;
+
+        if (is_object($data)) {
+            if (property_exists($data, 'filters')) {
+                $filters = $data->filters;
+                try {
+                    $this->_check_filters($filters);
+                } catch (InternalException $e) {
+                    $this->_handle_error(400, $e);
+                }
+            }
+
+            if (property_exists($data, 'limits')) {
+                $limits = $data->limits;
+                try {
+                    $this->_check_limits($limits);
+                } catch (InternalException $e) {
+                    $this->_handle_error(400, $e);
+                }
+            }
+        }
+
         try {
-            $db_data = DataBase::admin_regrequests_list();
+            $db_data = DataBase::admin_regrequests_list($filters, $limits);
         } catch (InternalException $e) {
-            $this->_handle_error(500);
+            $this->_handle_error(500, $e);
         }
         return $db_data;
     }
@@ -301,6 +328,28 @@ class TestController
         if (!$this->_has_operator_privs()) {
             $this->_handle_error(403);
         }
+        try {
+            $check_fields = ['regrequest_id'];
+            $check_int_fields = ['regrequest_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, true);
+        } catch (InternalException $e) {
+            $this->_handle_error(400, $e);
+        }
+
+        try {
+            $db_data = DataBase::admin_regrequests_get($data->regrequest_id);
+            if ($db_data) {
+                if ($db_data['is_approved'] === null) {
+                    // для ожидающих заявок подбор лицевых счетов в соответствии с заявкой
+
+                }
+            }
+
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+
+        return $db_data;
     }
     
     /**
@@ -321,7 +370,11 @@ class TestController
         }
     }
 
-    // 
+    // special methods
+
+    public function init() {
+        $this->_logger = new Logger('vkappsrvr');
+    }
 
     public function authorize() {
         global $_Config;
@@ -355,9 +408,14 @@ class TestController
 
     // PRIVATE SECTION
 
-    private function _handle_error($code = null, $message = null) {
-        if ($code === null) $code = 500;
-        throw new RestException($code, $message);
+    private function _log($text) {
+        if ($this->_logger) $this->_logger->log($text);
+    }
+
+    private function _handle_error($rest_code = null, $exception = null) {
+        if ($rest_code === null) $rest_code = 500;
+        $this->_log("REST EXCEPTION $rest_code: " . ($exception ? $exception->getMessage() : "UNKNOWN EXCEPTION"));
+        throw new RestException($rest_code, null);
     }
 
     private function _has_user_privs() {
@@ -381,6 +439,51 @@ class TestController
         return "ADMIN" == $this->_user_priv;
     }
 
+    private function _check_filters(&$filters) {
+        if (!is_array($filters)) {
+            throw new InternalException("attribute 'filters' should been of array type");
+        }
+        if (count($filters)) {
+            $check_fields = ['field', 'value'];
+            $check_int_fields = [];
+
+            try {
+                $this->_check_fields($filters, $check_fields, $check_int_fields, false);
+            } catch (InternalException $e) {
+                throw new InternalException("bad filters item: " . $e->getMessage());
+            }
+        }
+    }
+
+    private function _check_limits(&$limits) {
+        if (is_object($limits)) {
+            // передан ассоциативный массив с номером страницы и количеством на странице
+            $check_fields = ['page_num', 'page_len'];
+            $check_int_fields = ['page_num', 'page_len'];
+
+            try {
+                $this->_check_fields($limits, $check_fields, $check_int_fields, false);
+            } catch (InternalException $e) {
+                throw new InternalException("bad limits : " . $e->getMessage());
+            }
+            // преобразуем к массиву индекс-количество
+            $offset = ($limits->page_num -1) * $limits->page_len;
+            $page_len = $limits->page_len;
+            $limits = [];
+            array_push($limits, $offset, $page_len);
+
+        } elseif (is_array($limits)) {
+            // передан индексный массив - должен состоять из двух элементов
+            // 1 - начальный индекс
+            // 2 - количество
+            if (count($limits) != 2) {
+                throw new InternalException("attribute 'limits' should been array of 2 integers");
+            }
+        } else {
+            throw new InternalException("attribute 'limits' should been of array or object type");
+        }
+    }
+    
     private function _check_fields(&$data, $fields, $int_fields, $set_zero = true, $context = null) {
         if (is_array($data) && !_is_assoc($data)) {
             foreach ($data as $dataItem) {
