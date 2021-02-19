@@ -85,12 +85,12 @@ class TestController
     }
 
     /**
-    * @url POST /regrequests/get
-    * @url GET /regrequests/get
+    * @url POST /regrequests/list
+    * @url GET /regrequests/list
     */
-    public function regrequests_get($data) {
+    public function regrequests_list($data) {
         try {
-            $db_data = DataBase::regrequests_get($this->_user_id);
+            $db_data = DataBase::regrequests_list($this->_user_id);
         } catch (InternalException $e) {$this->_handle_error(500, $e);}
         return $db_data;
     }
@@ -122,14 +122,14 @@ class TestController
 
         try {
             // проверка на существование заявки
-            if (DataBase::is_regrequest_exists($this->_user_id, $reg_data->acc_id)) {
+            if (DataBase::is_waiting_regrequest_exists($this->_user_id, $reg_data->acc_id)) {
                 $this->_handle_error(409);
             }
             // проверка секретного кода
             if (!$reg_data->secret_code) {
                 $this->_handle_error(400);
             }
-            $accounts = DataBase::get_account_by_repr($reg_data->acc_id, $reg_data->secret_code);
+            $accounts = DataBase::get_accounts_by_repr($reg_data->acc_id, $reg_data->secret_code);
             if (count($accounts) != 1) {
                 $this->_handle_error(403);
             }
@@ -331,7 +331,7 @@ class TestController
         try {
             $check_fields = ['regrequest_id'];
             $check_int_fields = ['regrequest_id'];
-            $this->_check_fields($data, $check_fields, $check_int_fields, true);
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
         } catch (InternalException $e) {
             $this->_handle_error(400, $e);
         }
@@ -341,7 +341,13 @@ class TestController
             if ($db_data) {
                 if ($db_data['is_approved'] === null) {
                     // для ожидающих заявок подбор лицевых счетов в соответствии с заявкой
+                    $acc_data = DataBase::get_accounts_by_repr($db_data['acc_id'], null, 3);
+                    $db_data['selected_accounts'] = $acc_data;
 
+                } elseif ($db_data['is_approved']) {
+                    // для утвержденных выдаем информацию о привязанном лс
+                    $acc_data = DataBase::accounts_get($db_data['vk_user_id'], $db_data['linked_acc_id']);
+                    $db_data['selected_accounts'] = $acc_data;
                 }
             }
 
@@ -359,6 +365,46 @@ class TestController
         if (!$this->_has_operator_privs()) {
             $this->_handle_error(403);
         }
+
+        try {
+            $check_fields = ['regrequest_id', 'account_id'];
+            $check_int_fields = ['regrequest_id', 'account_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+        } catch (InternalException $e) {
+            $this->_handle_error(400, $e);
+        }
+
+        try {
+            $req_data = DataBase::admin_regrequests_get($data->regrequest_id);
+            if (!$req_data) {
+                $this->_handle_error(400, "registration request with id '$data->regrequest_id' not exists");
+            }
+
+            if ($req_data['is_approved'] !== null) {
+                $this->_handle_error(400, "registration request with id '$data->regrequest_id' already processed");
+            }
+
+            if (!DataBase::is_client_exists($data->account_id)) {
+                $this->_handle_error(400, "account with id '$data->account_id' not exists");
+            }
+
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+
+        try {
+            DataBase::transaction_begin();
+
+            DataBase::admin_users_add($req_data['vk_user_id'], 'USER', $this->_user_id);
+            DataBase::admin_accounts_add($req_data['vk_user_id'], $data->account_id);
+            DataBase::admin_regrequests_approve($req_data, $data->account_id, $this->_user_id);
+
+            DataBase::transaction_commit();
+
+        } catch (InternalException $e) {
+            DataBase::transaction_rollback();
+            $this->_handle_error(500, $e);
+        }
     }
     
     /**
@@ -368,7 +414,104 @@ class TestController
         if (!$this->_has_operator_privs()) {
             $this->_handle_error(403);
         }
+
+        try {
+            $check_fields = ['regrequest_id'];
+            $check_int_fields = ['regrequest_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+        } catch (InternalException $e) {
+            $this->_handle_error(400, $e);
+        }
+        $rejection_reason = null;
+        if (property_exists($data, 'rejection_reason')) {
+            $rejection_reason = $data->rejection_reason;
+        }
+
+        try {
+            $req_data = DataBase::admin_regrequests_get($data->regrequest_id);
+            if (!$req_data) {
+                $this->_handle_error(400, "registration request with id '$data->regrequest_id' not exists");
+            }
+
+            if ($req_data['is_approved'] !== null) {
+                $this->_handle_error(400, "registration request with id '$data->regrequest_id' already processed");
+            }
+
+            DataBase::admin_regrequests_reject($req_data, $this->_user_id, $rejection_reason);
+
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
     }
+    
+    /**
+    * @url POST /admin/data/set
+    */
+    public function admin_data_set($data) {
+        if (!$this->_has_operator_privs()) {
+            $this->_handle_error(403);
+        }
+
+        // check data
+        try {
+            $check_fields = ['clients', 'meters'];
+            $check_int_fields = [];
+            $this->_check_fields($data, $check_fields, $check_int_fields, true);
+
+            $clients = $data->clients;
+            if (!is_array($clients)) throw new InternalException('bad clients data');
+            
+            $meters = $data->meters;
+            if (!is_array($meters)) throw new InternalException('bad meters data');
+
+            $clients_fields = ['acc_id', 'secret_code', 'acc_id_repr', 'tenant_repr', 'address_repr'];
+            $check_int_fields = ['acc_id', 'secret_code'];
+            $this->_check_fields($clients, $clients_fields, $check_int_fields, false);
+
+            $meters_fields = ['index_num', 'acc_id', 'title', 'current_count'];
+            $check_int_fields = ['index_num', 'acc_id', 'current_count'];
+            $this->_check_fields($meters, $meters_fields, $check_int_fields, false);
+
+        } catch (InternalException $e) {
+            $this->_handle_error(400, $e);
+        }
+
+        $result = [
+            'clients' => 0,
+            'meters' => 0
+        ];
+
+        try {
+            DataBase::transaction_begin();
+
+            // clear tables
+            DataBase::clear_table('indications');
+            DataBase::clear_table('meters');
+            DataBase::clear_table('clients');
+
+            $result['clients'] = DataBase::insert_data('clients', $clients_fields, $clients, 1000);
+
+            $result['meters'] = DataBase::insert_data('meters', $meters_fields, $meters, 1000);
+
+            DataBase::transaction_commit();
+
+        } catch (InternalException $e) {
+            DataBase::transaction_rollback();
+            $this->_handle_error(500, $e);
+        }
+
+        return $result;
+    }
+    
+    /**
+    * @url POST /admin/data/get
+    */
+    public function admin_data_get($data) {
+        if (!$this->_has_operator_privs()) {
+            $this->_handle_error(403);
+        }
+    }
+
 
     // special methods
 
@@ -414,7 +557,15 @@ class TestController
 
     private function _handle_error($rest_code = null, $exception = null) {
         if ($rest_code === null) $rest_code = 500;
-        $this->_log("REST EXCEPTION $rest_code: " . ($exception ? $exception->getMessage() : "UNKNOWN EXCEPTION"));
+        $message = "UNKNOWN EXCEPTION";
+        if ($exception !== null) {
+            if (is_object($exception) && method_exists($exception, 'getMessage')) {
+                $message = $exception->getMessage();
+            } else {
+                $message = (string)$exception;
+            }
+        }
+        $this->_log("REST EXCEPTION $rest_code: $message");
         throw new RestException($rest_code, null);
     }
 

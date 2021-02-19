@@ -10,7 +10,7 @@ class DataBase {
 
     // /regrequests
 
-    public static function regrequests_get($vk_user_id) {
+    public static function regrequests_list($vk_user_id) {
         try {
             $db = self::db_open();
             $data = null;
@@ -314,21 +314,10 @@ class DataBase {
         }
     }
     
-    public static function admin_regrequests_approve($request, $account_id, $registrator) {
+    public static function admin_regrequests_approve($regrequest, $account_id, $registrator) {
         try {
             $db = self::db_open();
-            $db->getMysqli()->begin_transaction(); //(MYSQLI_TRANS_START_READ_WRITE);
-
-        } catch (Exception $e) {
-            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
-        }
-
-        try {
-            // создать пользователей
-            self::_create_user($db, $request['vk_user_id'], 'USER', $registrator);    
-            // привязать лс
-            self::_link_account($db, $request['vk_user_id'], $account_id);
-            // заапрувить заявки
+            
             $result = $db->query("UPDATE `registration_requests`
                 SET `is_approved` = 1, 
                 `linked_acc_id` = ?i,
@@ -336,12 +325,9 @@ class DataBase {
                 WHERE `id` = ?i;",
                 $account_id,
                 $registrator,
-                $request['id']);
-
-            $db->getMysqli()->commit();
+                $regrequest['id']);
 
         } catch (Exception $e) {
-            $db->getMysqli()->rollback();
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
     }
@@ -364,9 +350,53 @@ class DataBase {
         }
     }
 
-    // /admin/acc_data
+    // /admin/accounts
 
-    public static function admin_accdata_set($data) {
+    public static function admin_accounts_add($vk_user_id, $account_id) {
+        try {
+            $db = self::db_open();
+            if (self::_is_user_exists($db, $vk_user_id) && !self::_is_account_exists($db, $vk_user_id, $account_id)) {
+                $result = $db->query("
+                    INSERT INTO `accounts` 
+                    (`vk_user_id`, 
+                    `acc_id`) 
+                    VALUES (?i, ?i);",
+                $vk_user_id,
+                $account_id);
+                if ($result === false) throw new Exception('result of query is false');
+            }
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
+    // /admin/users
+
+    public static function admin_users_add($vk_user_id, $priveleges, $registrator) {
+        try {
+            $db = self::db_open();
+            if (!self::_is_user_exists($db, $vk_user_id)) {
+                $result = $db->query(
+                    "INSERT INTO `vk_users` 
+                    (`vk_user_id`, 
+                    `privileges`, 
+                    `registered_by`) 
+                    VALUES (?i, '?s', ?i);",
+                $vk_user_id,
+                $priveleges,
+                $registrator);
+                if ($result === false) throw new Exception('result of query is false');
+            }
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
+    // /admin/data
+
+    public static function admin_data_set($data) {
 
         try {
             $db = self::db_open();
@@ -477,21 +507,98 @@ class DataBase {
 
     // support functions 
 
-    public static function get_account_by_repr($acc_id_repr, $secret_code = null) {
+    public static function transaction_begin() {
+        $db = self::db_open();
+        $db->getMysqli()->begin_transaction(); //(MYSQLI_TRANS_START_READ_WRITE);
+    }
+
+    public static function transaction_commit() {
+        $db = self::db_open();
+        $db->getMysqli()->commit();
+    }
+
+    public static function transaction_rollback() {
+        $db = self::db_open();
+        $db->getMysqli()->rollback();
+    }
+
+    public static function clear_table($table_name) {
+        try {
+            $db = self::db_open();
+            if (!in_array($table_name, self::$clear_allowed_tables)) throw new Exception("not allowed to clear table '$table_name'");
+            $result = $db->query("DELETE FROM `$table_name`;");
+            if ($result === false) throw new Exception('result of query is false');
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
+    public static function insert_data($table_name, $fields, $data, $items_per_query = null) {
+        try {
+            $db = self::db_open();
+            $table_types = self::_get_table_types($db, $table_name);
+
+            $fields_clause = "";
+            foreach ($fields as $field) {
+                if (!array_key_exists($field, $table_types)) {
+                    throw new Exception("field '$field' not exists in table data schema");
+                }
+                $fields_clause .= ($fields_clause ? ", " : "") . "`$field`";
+            }
+
+            $values_clause = "";
+            $items_count = 0;
+            foreach ($data as $data_item) {
+                $item_clause = "";
+                $params = [];
+                foreach ($fields as $field) {
+                    if (!property_exists($data_item, $field)) {
+                        throw new Exception("missed property '$field' in data item");
+                    }
+                    array_push($params, $data_item->$field);
+                    $item_clause .= ($item_clause ? ", " : "") . (strcasecmp($table_types[$field], 'INT') == 0 ? "?i " : "'?s' ");
+                }
+                $values_clause .= ($values_clause ? ", " : "") . $db->prepare("($item_clause)", ...$params);
+                $items_count++;
+                if ($items_per_query) {
+                    if ($items_count % $items_per_query == 0 && $values_clause) {
+                        $result = $db->query("INSERT INTO `$table_name` ($fields_clause) VALUES $values_clause");
+                        if ($result === false) throw new Exception("result of insertion query is false");
+                        $values_clause = "";
+                    }
+                }
+            }
+            if ($values_clause) {
+                $result = $db->query("INSERT INTO `$table_name` ($fields_clause) VALUES $values_clause");
+                if ($result === false) throw new Exception("result of insertion query is false");
+            }
+            return $items_count;
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
+
+    public static function get_accounts_by_repr($acc_id_repr, $secret_code = null, $limit = null) {
         try {
             $db = self::db_open();
             $params = [];
             array_push($params, $acc_id_repr);
 
-            $query = "SELECT 
-                `acc_id`, 
-                `secret_code` 
+            $query = "SELECT *
                 FROM `clients` 
                 WHERE `acc_id_repr` LIKE '%?S%'";
             
             if ($secret_code) {
                 $query .= " AND `secret_code` = ?i";
                 array_push($params, $secret_code);
+            }
+
+            if ($limit) {
+                $query .= " LIMIT ?i";
+                array_push($params, $limit);
             }
 
             $result = $db->queryArguments($query, $params);
@@ -504,7 +611,8 @@ class DataBase {
         }
     }
 
-    public static function is_regrequest_exists($vk_user_id, $acc_id) {
+    // проверка на существования ожидающего запроса от указанного пользователя на присоединение указанного ЛС
+    public static function is_waiting_regrequest_exists($vk_user_id, $acc_id) {
         try {
             $db = self::db_open();
 
@@ -517,6 +625,28 @@ class DataBase {
                 AND `is_approved` IS NULL
                 AND `del_in_app` = 0;", 
             $vk_user_id,
+            $acc_id);
+
+            if ($result->getNumRows() != 0) {
+                return true;
+            }
+            return false;
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
+    // проверка на существования клиента (clients) с указанным id
+    public static function is_client_exists($acc_id) {
+        try {
+            $db = self::db_open();
+
+            $result = $db->query(
+            "SELECT
+                `acc_id`
+            FROM `clients` 
+            WHERE `acc_id` = ?i;", 
             $acc_id);
 
             if ($result->getNumRows() != 0) {
@@ -588,7 +718,7 @@ class DataBase {
 
     private static function _build_condition($field, $value, $data_type, &$params) {
         $condition = '';
-        if ( is_null($value) || (is_string($value) && strtoupper($value) === "NULL") ) {
+        if ( is_null($value) || (is_string($value) && strcasecmp($value, "NULL") == 0) ) {
             $condition = " `$field` IS NULL ";
         }
         elseif (is_array($value)) {
@@ -603,12 +733,12 @@ class DataBase {
                 $condition = " (" . $condition . ") ";
 
             } else {
-                $condition = " `$field` IN " . ($data_type == 'INT' ? "(?ai) " : "(?as) ");
+                $condition = " `$field` IN " . (strcasecmp($data_type, 'INT') == 0 ? "(?ai) " : "(?as) ");
                 $params[] = $value;
             }
         }
         else {
-            $condition = " `$field` = " . ($data_type == 'INT' ? "?i " : "'?s' ");
+            $condition = " `$field` = " . (strcasecmp($data_type, 'INT') == 0 ? "?i " : "'?s' ");
             $params[] = $value;
         }
         
@@ -622,10 +752,10 @@ class DataBase {
             foreach ($filters as $filter) {
                 $key = array_search($filter->field, array_column($table_fields, 'COLUMN_NAME'));
                 if ($key === false) throw new InternalException("bad table field name '$filter->field'");
-                $data_type = strtoupper($table_fields[$key]['DATA_TYPE']);
+                $data_type = $table_fields[$key]['DATA_TYPE'];
 
                 $where_clause .= (strlen($where_clause) ? " AND " : "")
-                    . ($data_type == "TIMESTAMP" 
+                    . (strcasecmp($data_type, "TIMESTAMP") == 0
                     ? self::_build_date_condition($filter->field, $filter->value, $data_type, $params)
                     : self::_build_condition($filter->field, $filter->value, $data_type, $params));
             }
@@ -659,16 +789,6 @@ class DataBase {
 
     // support functions (need opened db object)
 
-    private static function _clear_table($db, $table_name) {
-        try {
-            if (!in_array($table_name, self::$clear_allowed_tables)) throw new Exception("not allowed table '$table_name'");
-            $result = $db->query("DELETE FROM `".$table_name."`;");
-            if (!$result) throw new Exception('result of query is false');
-
-        } catch (Exception $e) {
-            throw new Exception("can not clear table '$table_name': ".$e->getMessage(), 0, $e);
-        }
-    }
 
     private static function _is_user_exists($db, $vk_user_id) {
         try {
@@ -685,27 +805,7 @@ class DataBase {
         }
     }
     
-    private static function _create_user($db, $vk_user_id, $priveleges, $registrator) {
-        try {
-            if (!self::_is_user_exists($vk_user_id)) {
-                $result = $db->query(
-                    "INSERT INTO `vk_users` 
-                    (`vk_user_id`, 
-                    `privileges`, 
-                    `registered_by`) 
-                    VALUES (?i, '?s', ?i);",
-                $vk_user_id,
-                $priveleges,
-                $registrator);
-                if (!$result) throw new Exception('result of query is false');
-            }
-
-        } catch (Exception $e) {
-            throw new Exception('can not create user: '.$e->getMessage(), 0, $e);
-        }
-    }
-
-    private static function _is_link_exists($db, $vk_user_id, $account_id) {
+    private static function _is_account_exists($db, $vk_user_id, $account_id) {
         try {
             $result = $db->query("
                 SELECT `id` 
@@ -721,24 +821,6 @@ class DataBase {
         }
     }
     
-    private static function _link_account($db, $vk_user_id, $account_id) {
-        try {
-            if (self::_is_user_exists($db, $vk_user_id) && !self::_is_link_exists($db, $vk_user_id, $account_id)) {
-                $result = $db->query("
-                    INSERT INTO `accounts` 
-                    (`vk_user_id`, 
-                    `acc_id`) 
-                    VALUES (?i, ?i);",
-                $vk_user_id,
-                $account_id);
-                if (!$result) throw new Exception('result of query is false');
-            }
-
-        } catch (Exception $e) {
-            throw new Exception('can not link account to user: '.$e->getMessage(), 0, $e);
-        }
-    }
-
     private static function _get_table_info($db, $table_name) {
         try {
             $result = $db->query("SELECT 
@@ -760,5 +842,10 @@ class DataBase {
         }
     }
 
+    private static function _get_table_types($db, $table_name) {
+        $data = self::_get_table_info($db, $table_name);
+        return array_combine(array_column($data, 'COLUMN_NAME'), array_column($data, 'DATA_TYPE'));
+
+    }
 
 }
