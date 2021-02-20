@@ -271,7 +271,7 @@ class DataBase {
 
             $params = [];
             if ($filters) {
-                $where_clause = self::_build_filters($filters, self::_get_table_info($db, $table_name), $params);
+                $where_clause = self::_build_filters($filters, self::_get_tables_info($db, $table_name), $params);
             }
             if ($limits) {
                 $limit_clause = self::_build_limits($limits, $params);
@@ -465,23 +465,11 @@ class DataBase {
 
     // /admin/indications
 
-    public static function admin_indications_get($period_begin = null, $period_end = null) {
+    public static function admin_indications_get($filters = null) {
         try {
-            if (!is_object($data_params)) throw new InternalException("data_params is not object");
-            $where_clause = "";
-            $params = [];
-            if (is_string($period_begin) && strlen($period_begin)) {
-                $where_clause .= (strlen($where_clause) ? ' AND ' : '') . "`recieve_date` >= '?s'";
-                $params[] = $period_begin;
-            }
-            if (is_string($period_end) && strlen($period_end)) {
-                $where_clause .= (strlen($where_clause) ? ' AND ' : '') . "`recieve_date` <= '?s'";
-                $params[] = $period_end;
-            }
-
-            $db = $self::db_open();
-            $query = "
-                SELECT  
+            $db = self::db_open();
+            $query = 
+                "SELECT  
                     `indications`.`id` AS 'indication_id',
                     `indications`.`count` AS 'count',
                     `indications`.`recieve_date` AS 'recieve_date',
@@ -493,9 +481,17 @@ class DataBase {
                 FROM `indications`
                     LEFT JOIN `meters` ON `indications`.`meter_id` = `meters`.`id`
                     LEFT JOIN `clients` ON `meters`.`acc_id` = `clients`.`acc_id`";
-            if (strlen($where_clause)) {
-                $query .= " WHERE " . $where_clause;
+
+            $params = [];
+            $where_clause = '';
+            if ($filters) {
+                $table_names = ['indications', 'meters', 'clients'];
+                $where_clause = self::_build_filters($filters, self::_get_tables_info($db, $table_names), $params);
+                if ($where_clause) {
+                    $query .= " WHERE $where_clause";
+                }
             }
+
             $result = $db->queryArguments($query, $params);
             if ($result === false) throw new Exception('result of query is false');
             return $result->fetch_assoc_array();
@@ -681,7 +677,7 @@ class DataBase {
         return false;
     }
 
-    private static function _build_date_condition($field, $value, $data_type, &$params) {
+    private static function _build_date_condition($table, $field, $value, $data_type, &$params) {
         $condition = '';
 
         if (is_array($value)) {
@@ -691,12 +687,12 @@ class DataBase {
                 $condition = " FALSE ";
             } elseif ($len == 1) {
                 // один элемент
-                $condition = " DATE(`$field`) = '?s' ";
+                $condition = " DATE(`$table`.`$field`) = '?s' ";
                 $params[] = self::_str_to_date($value[0]);
             } else {
                 // в массиве две даты: меньшая - начало периода, большая - конец периода
                 sort($value);
-                $condition = " `$field` BETWEEN '?s' AND '?s' ";
+                $condition = " `$table`.`$field` BETWEEN '?s' AND '?s' ";
                 $params[] = self::_str_to_date($value[0], [
                     "hour" => 0,
                     "minute" => 0,
@@ -716,10 +712,10 @@ class DataBase {
         return $condition;
     }
 
-    private static function _build_condition($field, $value, $data_type, &$params) {
+    private static function _build_condition($table, $field, $value, $data_type, &$params) {
         $condition = '';
         if ( is_null($value) || (is_string($value) && strcasecmp($value, "NULL") == 0) ) {
-            $condition = " `$field` IS NULL ";
+            $condition = " `$table`.`$field` IS NULL ";
         }
         elseif (is_array($value)) {
             // если в массиве есть null, то нельзя использовать IN ()
@@ -728,38 +724,63 @@ class DataBase {
                 $condition = " FALSE ";
             } elseif (self::_is_values_array_contents_null($value)) {
                 foreach ($value as $value_item) {
-                    $condition .= (strlen($condition) ? " OR " : "") . self::_build_condition($field, $value_item, $data_type, $params);
+                    $condition .= (strlen($condition) ? " OR " : "") . self::_build_condition($table, $field, $value_item, $data_type, $params);
                 }
                 $condition = " (" . $condition . ") ";
 
             } else {
-                $condition = " `$field` IN " . (strcasecmp($data_type, 'INT') == 0 ? "(?ai) " : "(?as) ");
+                $condition = " `$table`.`$field` IN " . (strcasecmp($data_type, 'INT') == 0 ? "(?ai) " : "(?as) ");
                 $params[] = $value;
             }
         }
         else {
-            $condition = " `$field` = " . (strcasecmp($data_type, 'INT') == 0 ? "?i " : "'?s' ");
+            $condition = " `$table`.`$field` = " . (strcasecmp($data_type, 'INT') == 0 ? "?i " : "'?s' ");
             $params[] = $value;
         }
         
         return $condition;
     }
 
-    private static function _build_filters($filters, $table_fields, &$params) {
-        
-        $where_clause = '';
-        if (is_array($filters)) {
-            foreach ($filters as $filter) {
-                $key = array_search($filter->field, array_column($table_fields, 'COLUMN_NAME'));
-                if ($key === false) throw new InternalException("bad table field name '$filter->field'");
-                $data_type = $table_fields[$key]['DATA_TYPE'];
+    private static function _build_filters($filters, $tables_info, &$params) {
+        try {
+            $where_clause = '';
+            if (is_array($filters)) {
+                foreach ($filters as $filter) {
+                    $table = '';
+                    // имя поля может содержать имя таблицы в виде tablename.fieldname
+                    if (strpos($filter->field, '.') !== false) {
+                        list($table, $field) = explode('.', $filter->field);
+                    } else {
+                        $field = $filter->field;
+                    }
+                    // найдем инфо по полю в данных по таблицах
+                    if ($table) {
+                        if (!array_key_exists($table, $tables_info)) {
+                            throw new Exception("no info given about table '$table'");
+                        }
+                        $table_fields = $tables_info[$table];
+                    } else {
+                        // таблица не указана значит берем первый и единственный элемент
+                        if (count($tables_info) != 1) {
+                            throw new Exception("no info given about table or goven too much");
+                        }
+                        $table = array_key_first($tables_info);
+                        $table_fields = $tables_info[$table];
+                    }
+                    $key = array_search($field, array_column($table_fields, 'COLUMN_NAME'));
+                    if ($key === false) throw new Exception("field '$field' not exists in table '$table'");
+                    $data_type = $table_fields[$key]['DATA_TYPE'];
 
-                $where_clause .= (strlen($where_clause) ? " AND " : "")
-                    . (strcasecmp($data_type, "TIMESTAMP") == 0
-                    ? self::_build_date_condition($filter->field, $filter->value, $data_type, $params)
-                    : self::_build_condition($filter->field, $filter->value, $data_type, $params));
+                    $where_clause .= (strlen($where_clause) ? " AND " : "")
+                        . (strcasecmp($data_type, "TIMESTAMP") == 0
+                        ? self::_build_date_condition($table, $field, $filter->value, $data_type, $params)
+                        : self::_build_condition($table, $field, $filter->value, $data_type, $params));
+                }
             }
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
         }
+
         return $where_clause;
     }
 
@@ -821,6 +842,19 @@ class DataBase {
         }
     }
     
+    private static function _get_tables_info($db, $table_names) {
+        $result = [];
+        if (is_string($table_names)) {
+            $result[$table_names] = self::_get_table_info($db, $table_names);
+        } elseif (is_array($table_names)) {
+            foreach ($table_names as $table_name) {
+                $result[$table_name] = self::_get_table_info($db, $table_name);
+            }
+        }
+
+        return $result;
+    }
+
     private static function _get_table_info($db, $table_name) {
         try {
             $result = $db->query("SELECT 

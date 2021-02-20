@@ -510,6 +510,26 @@ class TestController
         if (!$this->_has_operator_privs()) {
             $this->_handle_error(403);
         }
+        $filters = null;
+
+        if (is_object($data)) {
+            if (property_exists($data, 'filters')) {
+                $filters = $data->filters;
+                try {
+                    $this->_check_filters($filters);
+                } catch (InternalException $e) {
+                    $this->_handle_error(400, $e);
+                }
+            }
+        }
+
+        try {
+            $db_data = DataBase::admin_indications_get($filters);
+
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+        return $db_data;
     }
 
 
