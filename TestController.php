@@ -68,6 +68,7 @@ class TestController
                 'vk_app_id' => $_Config['vk_app_id']
             ];
             $status = true;
+            $this->_log("sign_params = " . print_r($sign_params, true));
         }
 
         if ($status) {

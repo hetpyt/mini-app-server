@@ -762,7 +762,7 @@ class DataBase {
                     } else {
                         // таблица не указана значит берем первый и единственный элемент
                         if (count($tables_info) != 1) {
-                            throw new Exception("no info given about table or goven too much");
+                            throw new Exception("no info given about table or given too much");
                         }
                         $table = array_key_first($tables_info);
                         $table_fields = $tables_info[$table];
