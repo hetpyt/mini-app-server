@@ -1,6 +1,7 @@
 <?php
 use Jacwright\RestServer\RestException;
 //use Krugozor\Database\Mysql\Mysql;
+require_once 'AppError.php';
 require_once 'Common.php';
 require_once 'InternalException.php';
 require_once 'Logger.php';
@@ -124,15 +125,18 @@ class TestController
         try {
             // проверка на существование заявки
             if (DataBase::is_waiting_regrequest_exists($this->_user_id, $reg_data->acc_id)) {
-                $this->_handle_error(409);
+                //$this->_handle_error(409);
+                return $this->_return_app_error(APPERR_REGREQUEST_DUBL);
             }
             // проверка секретного кода
             if (!$reg_data->secret_code) {
-                $this->_handle_error(400);
+                //$this->_handle_error(400);
+                return $this->_return_app_error(APPERR_BAD_SECRETCODE);
             }
             $accounts = DataBase::get_accounts_by_repr($reg_data->acc_id, $reg_data->secret_code);
             if (count($accounts) != 1) {
-                $this->_handle_error(403);
+                //$this->_handle_error(APPERR_ACCOUNT_NOT_FOUND);
+                return $this->_return_app_error(APPERR_ACCOUNT_NOT_FOUND);
             }
             // 
             DataBase::regrequests_add($this->_user_id, $reg_data);
@@ -187,6 +191,7 @@ class TestController
     */
     public function users_privileges_get($data) {
         try {
+            //throw new InternalException('foo');
             $db_data = DataBase::users_privileges_get($this->_user_id);
         } catch (InternalException $e) {$this->_handle_error(500, $e);}
 
@@ -574,6 +579,15 @@ class TestController
 
     private function _log($text) {
         if ($this->_logger) $this->_logger->log($text);
+    }
+
+    private function _return_app_error($code, $message = 'unknown error') {
+        return [
+            'error' => [
+                'code' => $code,
+                'message' => $message
+            ]
+        ];
     }
 
     private function _handle_error($rest_code = null, $exception = null) {
