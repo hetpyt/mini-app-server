@@ -139,10 +139,11 @@ class TestController
                 return $this->_return_app_error(APPERR_ACCOUNT_NOT_FOUND);
             }
             // 
-            DataBase::regrequests_add($this->_user_id, $reg_data);
+            $rows_insert = DataBase::regrequests_add($this->_user_id, $reg_data);
+
         } catch (InternalException $e) {$this->_handle_error(500, $e);}
 
-        return;
+        return $rows_insert > 0;
     }
 
     /**
@@ -581,7 +582,10 @@ class TestController
         if ($this->_logger) $this->_logger->log($text);
     }
 
-    private function _return_app_error($code, $message = 'unknown error') {
+    private function _return_app_error($code, $message = null) {
+        if (!$message && array_key_exists($code, APPERR_MESSAGES_RU)) {
+            $message = APPERR_MESSAGES_RU[$code];
+        }
         return [
             'error' => [
                 'code' => $code,

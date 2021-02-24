@@ -54,7 +54,7 @@ class DataBase {
                 (string)$reg_data->n_kv
             );
 
-            return null;
+            return $db->getAffectedRows();
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
