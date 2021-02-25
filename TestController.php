@@ -233,7 +233,8 @@ class TestController
         // проверка аккаунта на принадлежность пользователю
         try {
             if (DataBase::accounts_get($this->_user_id, $data->account_id) === null) {
-                $this->_handle_error(403);
+                //$this->_handle_error(403);
+                return $this->_return_app_error(APPERR_ACCOUNT_NOT_OWNED);
             }
             // получение данных по счетчикам
             $db_data = DataBase::meters_list($this->_user_id, $data->account_id);
