@@ -288,7 +288,7 @@ class TestController
             }
         }
 
-        return;
+        return true;
     }
     
     /**
