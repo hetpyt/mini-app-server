@@ -330,6 +330,14 @@ class TestController
     }
     
     /**
+    * @url POST /admin/regrequests/count
+    */
+    public function admin_regrequests_count($data) {
+        $db_data = $this->admin_regrequests_list($data);
+        return count($db_data);
+    }
+
+    /**
     * @url POST /admin/regrequests/get
     */
     public function admin_regrequests_get($data) {
