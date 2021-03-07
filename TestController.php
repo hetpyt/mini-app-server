@@ -363,7 +363,7 @@ class TestController
                 } elseif ($db_data['is_approved']) {
                     // для утвержденных выдаем информацию о привязанном лс
                     $acc_data = DataBase::accounts_get($db_data['vk_user_id'], $db_data['linked_acc_id']);
-                    $db_data['selected_accounts'] = $acc_data;
+                    $db_data['selected_accounts'] = [$acc_data];
                 }
             }
 
@@ -393,15 +393,18 @@ class TestController
         try {
             $req_data = DataBase::admin_regrequests_get($data->regrequest_id);
             if (!$req_data) {
-                $this->_handle_error(400, "registration request with id '$data->regrequest_id' not exists");
+                //$this->_handle_error(400, "registration request with id '$data->regrequest_id' not exists");
+                return $this->_return_app_error(APPERR_REGREQUEST_NOT_EXISTS, $data->regrequest_id);
             }
 
             if ($req_data['is_approved'] !== null) {
-                $this->_handle_error(400, "registration request with id '$data->regrequest_id' already processed");
+                //$this->_handle_error(400, "registration request with id '$data->regrequest_id' already processed");
+                return $this->_return_app_error(APPERR_REGREQUEST_ALREADY_PROCESSED, $data->regrequest_id);
             }
 
             if (!DataBase::is_client_exists($data->account_id)) {
-                $this->_handle_error(400, "account with id '$data->account_id' not exists");
+                //$this->_handle_error(400, "account with id '$data->account_id' not exists");
+                return $this->_return_app_error(APPERR_ACCOUNT_NOT_EXISTS, $data->account_id);
             }
 
         } catch (InternalException $e) {
@@ -421,6 +424,7 @@ class TestController
             DataBase::transaction_rollback();
             $this->_handle_error(500, $e);
         }
+        return true;
     }
     
     /**
@@ -446,11 +450,13 @@ class TestController
         try {
             $req_data = DataBase::admin_regrequests_get($data->regrequest_id);
             if (!$req_data) {
-                $this->_handle_error(400, "registration request with id '$data->regrequest_id' not exists");
+                //$this->_handle_error(400, "registration request with id '$data->regrequest_id' not exists");
+                return $this->_return_app_error(APPERR_REGREQUEST_NOT_EXISTS, $data->regrequest_id);
             }
 
             if ($req_data['is_approved'] !== null) {
-                $this->_handle_error(400, "registration request with id '$data->regrequest_id' already processed");
+                //$this->_handle_error(400, "registration request with id '$data->regrequest_id' already processed");
+                return $this->_return_app_error(APPERR_REGREQUEST_ALREADY_PROCESSED, $data->regrequest_id);
             }
 
             DataBase::admin_regrequests_reject($req_data, $this->_user_id, $rejection_reason);
@@ -458,6 +464,7 @@ class TestController
         } catch (InternalException $e) {
             $this->_handle_error(500, $e);
         }
+        return true;
     }
     
     /**
@@ -591,9 +598,20 @@ class TestController
         if ($this->_logger) $this->_logger->log($text);
     }
 
-    private function _return_app_error($code, $message = null) {
-        if (!$message && array_key_exists($code, APPERR_MESSAGES_RU)) {
+    private function _return_app_error() {
+        $args = func_get_args();
+
+        $code = array_shift($args);
+        if ($code == null) $code = -999;
+        $message = "";
+
+        if (array_key_exists($code, APPERR_MESSAGES_RU)) {
             $message = APPERR_MESSAGES_RU[$code];
+        }
+        $index = 0;
+        foreach ($args as $arg) {
+            $message = str_replace('{'.$index.'}', $arg, $message);
+            $index ++;
         }
         return [
             'error' => [
