@@ -686,24 +686,32 @@ class DataBase {
                 // пустой массив - ложное условие
                 $condition = " FALSE ";
             } elseif ($len == 1) {
-                // один элемент
-                $condition = " DATE(`$table`.`$field`) = '?s' ";
+                // один элемент - принимаем как дата начала
+                $condition = " DATE(`$table`.`$field`) >= '?s' ";
                 $params[] = self::_str_to_date($value[0]);
             } else {
-                // в массиве две даты: меньшая - начало периода, большая - конец периода
-                sort($value);
-                $condition = " `$table`.`$field` BETWEEN '?s' AND '?s' ";
-                $params[] = self::_str_to_date($value[0], [
-                    "hour" => 0,
-                    "minute" => 0,
-                    "second" => 0
-                ]);
-                $params[] = self::_str_to_date($value[$len - 1], [
-                    "hour" => 23,
-                    "minute" => 59,
-                    "second" => 59
-                ]);
-            }
+                // два и более элемента - интервал от 0 и до len-1 включительно
+                if ($value[0] && $value[1]) {
+                    // обе даты - between
+                    $condition = " `$table`.`$field` BETWEEN '?s' AND '?s' ";
+                    $params[] = self::_str_to_date($value[0], [
+                        "hour" => 0,
+                        "minute" => 0,
+                        "second" => 0
+                    ]);
+                    $params[] = self::_str_to_date($value[$len - 1], [
+                        "hour" => 23,
+                        "minute" => 59,
+                        "second" => 59
+                    ]);
+                } elseif ($value[0]) {
+                    $condition = " DATE(`$table`.`$field`) >= '?s' ";
+                    $params[] = self::_str_to_date($value[0]);
+                } elseif ($value[1]) {
+                    $condition = " DATE(`$table`.`$field`) <= '?s' ";
+                    $params[] = self::_str_to_date($value[1]);
+                }
+            } 
         } else {
             // одна дата: делаем выборку за день
             $condition = " DATE(`$field`) = '?s' ";

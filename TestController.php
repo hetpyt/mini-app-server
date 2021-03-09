@@ -477,9 +477,9 @@ class TestController
 
         // check data
         try {
-            $check_fields = ['clients', 'meters'];
-            $check_int_fields = [];
-            $this->_check_fields($data, $check_fields, $check_int_fields, true);
+            $check_fields = ['clients', 'meters', 'clients_count', 'meters_count'];
+            $check_int_fields = ['clients_count', 'meters_count'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
 
             $clients = $data->clients;
             if (!is_array($clients)) throw new InternalException('bad clients data');
@@ -500,8 +500,8 @@ class TestController
         }
 
         $result = [
-            'clients' => 0,
-            'meters' => 0
+            'clients_count' => 0,
+            'meters_count' => 0
         ];
 
         try {
@@ -512,9 +512,9 @@ class TestController
             DataBase::clear_table('meters');
             DataBase::clear_table('clients');
 
-            $result['clients'] = DataBase::insert_data('clients', $clients_fields, $clients, 1000);
+            $result['clients_count'] = DataBase::insert_data('clients', $clients_fields, $clients, 1000);
 
-            $result['meters'] = DataBase::insert_data('meters', $meters_fields, $meters, 1000);
+            $result['meters_count'] = DataBase::insert_data('meters', $meters_fields, $meters, 1000);
 
             DataBase::transaction_commit();
 
