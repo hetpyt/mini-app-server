@@ -300,9 +300,10 @@ class TestController
         }
         $filters = null;
         $limits = null;
+        $order = null;
 
         if (is_object($data)) {
-            if (property_exists($data, 'filters')) {
+            if (property_exists($data, 'filters') && $data->filters) {
                 $filters = $data->filters;
                 try {
                     $this->_check_filters($filters);
@@ -311,7 +312,7 @@ class TestController
                 }
             }
 
-            if (property_exists($data, 'limits')) {
+            if (property_exists($data, 'limits') && $data->limits) {
                 $limits = $data->limits;
                 try {
                     $this->_check_limits($limits);
@@ -319,10 +320,14 @@ class TestController
                     $this->_handle_error(400, $e);
                 }
             }
+
+            if (property_exists($data, 'order') && $data->order) {
+                $order = $data->order;
+            }
         }
 
         try {
-            $db_data = DataBase::admin_regrequests_list($filters, $limits);
+            $db_data = DataBase::admin_regrequests_list($filters, $order, $limits);
         } catch (InternalException $e) {
             $this->_handle_error(500, $e);
         }
@@ -536,7 +541,7 @@ class TestController
         $filters = null;
 
         if (is_object($data)) {
-            if (property_exists($data, 'filters')) {
+            if (property_exists($data, 'filters') && $data->filters) {
                 $filters = $data->filters;
                 try {
                     $this->_check_filters($filters);
@@ -670,6 +675,9 @@ class TestController
                 throw new InternalException("bad filters item: " . $e->getMessage());
             }
         }
+    }
+
+    private function _check_order(&$order) {
     }
 
     private function _check_limits(&$limits) {

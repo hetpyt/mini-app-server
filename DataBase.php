@@ -25,7 +25,8 @@ class DataBase {
             FROM `registration_requests` 
             WHERE `vk_user_id` = ?i 
                 AND `hide_in_app` = 0 
-                AND `del_in_app` = 0;", 
+                AND `del_in_app` = 0
+            ORDER BY `request_date` DESC;", 
             $vk_user_id);
 
             if ($result->getNumRows() != 0) {
@@ -249,7 +250,7 @@ class DataBase {
 
     // /admin/regrequests
 
-    public static function admin_regrequests_list($filters = null, $limits = null) {
+    public static function admin_regrequests_list($filters = null, $order = null, $limits = null) {
         try {
             $db = self::db_open();
             $table_name = 'registration_requests';
@@ -267,11 +268,17 @@ class DataBase {
 
             $from_clause = "FROM `$table_name`";
             $where_clause = "";
+            $order_clause = "";
             $limit_clause = "";
+
+            $tables_info = self::_get_tables_info($db, $table_name);
 
             $params = [];
             if ($filters) {
-                $where_clause = self::_build_filters($filters, self::_get_tables_info($db, $table_name), $params);
+                $where_clause = self::_build_filters($filters, $tables_info, $params);
+            }
+            if ($order) {
+                $order_clause = self::_build_order($order, $tables_info);
             }
             if ($limits) {
                 $limit_clause = self::_build_limits($limits, $params);
@@ -280,6 +287,7 @@ class DataBase {
                 $select_clause . " " . 
                 $from_clause . " " . 
                 ($where_clause ? "WHERE $where_clause" : "") . " " .
+                $order_clause . " " .
                 $limit_clause,
                 $params);
             if ($result->getNumRows() != 0) {
@@ -749,35 +757,41 @@ class DataBase {
         return $condition;
     }
 
+    private static function _parse_field($field, $tables_info) {
+        $table = '';
+        // имя поля может содержать имя таблицы в виде tablename.fieldname
+        if (strpos($field, '.') !== false) {
+            list($table, $field) = explode('.', $field);
+        }
+        // найдем инфо по полю в данных по таблицах
+        if ($table) {
+            if (!array_key_exists($table, $tables_info)) {
+                throw new Exception("no info given about table '$table'");
+            }
+            $table_fields = $tables_info[$table];
+        } else {
+            // таблица не указана значит берем первый и единственный элемент
+            if (count($tables_info) != 1) {
+                throw new Exception("no info given about table or given too much");
+            }
+            $table = array_key_first($tables_info);
+            $table_fields = $tables_info[$table];
+        }
+        $key = array_search($field, array_column($table_fields, 'COLUMN_NAME'));
+        if ($key === false) throw new Exception("field '$field' not exists in table '$table'");
+        $field_data = $table_fields[$key];
+        return [$table, $field, $field_data];
+    }
+
     private static function _build_filters($filters, $tables_info, &$params) {
         try {
             $where_clause = '';
             if (is_array($filters)) {
                 foreach ($filters as $filter) {
-                    $table = '';
-                    // имя поля может содержать имя таблицы в виде tablename.fieldname
-                    if (strpos($filter->field, '.') !== false) {
-                        list($table, $field) = explode('.', $filter->field);
-                    } else {
-                        $field = $filter->field;
-                    }
-                    // найдем инфо по полю в данных по таблицах
-                    if ($table) {
-                        if (!array_key_exists($table, $tables_info)) {
-                            throw new Exception("no info given about table '$table'");
-                        }
-                        $table_fields = $tables_info[$table];
-                    } else {
-                        // таблица не указана значит берем первый и единственный элемент
-                        if (count($tables_info) != 1) {
-                            throw new Exception("no info given about table or given too much");
-                        }
-                        $table = array_key_first($tables_info);
-                        $table_fields = $tables_info[$table];
-                    }
-                    $key = array_search($field, array_column($table_fields, 'COLUMN_NAME'));
-                    if ($key === false) throw new Exception("field '$field' not exists in table '$table'");
-                    $data_type = $table_fields[$key]['DATA_TYPE'];
+
+                    list($table, $field, $field_data) = self::_parse_field($filter->field, $tables_info);
+
+                    $data_type = $field_data['DATA_TYPE'];
 
                     $where_clause .= (strlen($where_clause) ? " AND " : "")
                         . (strcasecmp($data_type, "TIMESTAMP") == 0
@@ -790,6 +804,26 @@ class DataBase {
         }
 
         return $where_clause;
+    }
+
+    private static function _build_order($order, $tables_info) {
+        try {
+            $order_clause = "";
+            $field = (string) $order;
+            $dir = "ASC";
+            if ($field[0] == "-") {
+                $dir = "DESC";
+                $field = substr($field, 1);
+            }
+            list($table, $field, $field_data) = self::_parse_field($field, $tables_info);
+
+            $order_clause = " ORDER BY `{$table}`.`{$field}` {$dir} ";
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+
+        return $order_clause;
     }
 
     private static function _build_limits($limits, &$params) {
