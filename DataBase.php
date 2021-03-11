@@ -71,7 +71,7 @@ class DataBase {
                 $regrequest_id,
                 $$vk_user_id);
 
-            return null;
+            return $db->getAffectedRows();
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
@@ -87,7 +87,9 @@ class DataBase {
                 $regrequest_id,
                 $$vk_user_id);
 
-            return null;
+            if ($result === false) throw new Exception('result of query is false');
+
+            return $db->getAffectedRows();
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
@@ -96,6 +98,41 @@ class DataBase {
 
     // /users/privileges
     
+    public static function app_permissions_get() {
+        try {
+            $db = self::db_open();
+            $data = null;
+            $result = $db->query(
+                "SELECT 
+                    `id`,
+                    `date_begin`, 
+                    `indications`,
+                    `registration`
+                FROM `permitted_functions` 
+                WHERE `date_begin` <= CURRENT_TIMESTAMP 
+                ORDER BY `date_begin` 
+                DESC LIMIT 1");
+
+            if ($result === false) throw new Exception('result of query is false');
+
+            if ($result->getNumRows() != 0) {
+                $data = $result->fetch_assoc_array()[0];
+            } else {
+                // нет записи о разрешенных функциях на текущий момент - запрещено все
+                $data = [
+                    'id' => 0,
+                    'date_begin' => date_create(),
+                    'indications' => 0,
+                    'registration' => 0
+                ];
+            }
+            return $data;
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
     public static function users_privileges_get($vk_user_id) {
         try {
             $db = self::db_open();

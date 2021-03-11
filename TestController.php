@@ -193,10 +193,14 @@ class TestController
     public function privileges_get($data) {
         try {
             //throw new InternalException('foo');
-            $db_data = DataBase::users_privileges_get($this->_user_id);
+            $priv_data = DataBase::users_privileges_get($this->_user_id);
+            $perm_data = DataBase::app_permissions_get();
         } catch (InternalException $e) {$this->_handle_error(500, $e);}
 
-        return $db_data;
+        return [
+            'user_privileges' => $priv_data,
+            'app_permissions' => $perm_data
+        ];
     }
 
     /**
