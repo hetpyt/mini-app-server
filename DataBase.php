@@ -213,10 +213,8 @@ class DataBase {
             ON `meters`.`id` = `lastIndications`.`meter_id`
             WHERE `meters`.`acc_id` = '?i';", $acc_id);
 
-            if ($result->getNumRows() != 0) {
-                return $result->fetch_assoc_array();
-            }  
-            return [];  
+            if ($result === false) throw new Exception('result of query is false');
+            return $result->fetch_assoc_array();
 
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
@@ -224,6 +222,33 @@ class DataBase {
     }
 
     // /indications
+
+    public static function indications_list($vk_user_id, $acc_id) {
+        try {
+            $db = self::db_open();
+            $data = null;
+            $result = $db->query(
+                "SELECT 
+                    `indications`.`id`,
+                    `indications`.`count` AS 'new_count',
+                    `indications`.`recieve_date`,
+                    `indications`.`vk_user_id`,
+                    `meters`.`id` AS 'meter_id',
+                    `meters`.`index_num`,
+                    `meters`.`title`,
+                    `meters`.`current_count`,
+                    `meters`.`updated`
+                FROM `indications` 
+                LEFT JOIN `meters` ON `indications`.`meter_id` = `meters`.`id`
+                WHERE `meters`.`acc_id` = ?i", $acc_id);
+
+            if ($result === false) throw new Exception('result of query is false');
+            return $result->fetch_assoc_array();
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
 
     public static function indications_add($vk_user_id, $meters) {
         try {
@@ -249,6 +274,10 @@ class DataBase {
     }
 
     // /admin/regrequests
+
+    public static function admin_regrequests_count($filters = null) {
+        return self::get_rows_count('registration_requests', $filters);
+    }
 
     public static function admin_regrequests_list($filters = null, $order = null, $limits = null) {
         try {
@@ -283,6 +312,7 @@ class DataBase {
             if ($limits) {
                 $limit_clause = self::_build_limits($limits, $params);
             }
+            $params2 = $params;
             $result = $db->queryArguments(
                 $select_clause . " " . 
                 $from_clause . " " . 
@@ -290,10 +320,15 @@ class DataBase {
                 $order_clause . " " .
                 $limit_clause,
                 $params);
-            if ($result->getNumRows() != 0) {
-                return $result->fetch_assoc_array();
-            }  
-            return [];  
+
+            if ($result === false) throw new Exception('result of query is false');
+
+            $data = $result->fetch_assoc_array();
+            $total_count = self::_get_rows_count($db, $table_name, $where_clause, $params2);
+            return [
+                "data" => $data,
+                "total_count" => $total_count
+            ];
             
         } catch (Exception $e) {
             throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
@@ -524,6 +559,23 @@ class DataBase {
     public static function transaction_rollback() {
         $db = self::db_open();
         $db->getMysqli()->rollback();
+    }
+
+    public static function get_rows_count($table_name, $filters) {
+        try {
+            $db = self::db_open();
+            $where_clause = "";
+            $tables_info = self::_get_tables_info($db, $table_name);
+            $params = [];
+            if ($filters) {
+                $where_clause = self::_build_filters($filters, $tables_info, $params);
+            }
+            $result = self::_get_rows_count($db, $table_name, $where_clause, $params);
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+        return $result;
     }
 
     public static function clear_table($table_name) {
@@ -852,6 +904,25 @@ class DataBase {
 
     // support functions (need opened db object)
 
+    private static function _get_rows_count($db, $table_name, $where_clause = "", $params = null) {
+        try {
+            $select_clause = "SELECT COUNT(*) AS `count` ";
+            $from_clause = "FROM `$table_name`";
+
+            if (!is_array($params)) $params = [];
+            $result = $db->queryArguments(
+                $select_clause . " " . 
+                $from_clause . " " . 
+                ($where_clause ? "WHERE $where_clause" : ""),
+                $params);
+
+            if ($result === false) throw new Exception('result of query is false');
+            
+        } catch (Exception $e) {
+            throw new Exception(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+        return $result->fetch_assoc_array()[0]["count"];
+    }
 
     private static function _is_user_exists($db, $vk_user_id) {
         try {

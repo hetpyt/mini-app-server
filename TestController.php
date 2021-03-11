@@ -187,10 +187,10 @@ class TestController
     }
 
     /**
-    * @url POST /users/privileges/get
-    * @url GET /users/privileges/get
+    * @url POST /privileges/get
+    * @url GET /privileges/get
     */
-    public function users_privileges_get($data) {
+    public function privileges_get($data) {
         try {
             //throw new InternalException('foo');
             $db_data = DataBase::users_privileges_get($this->_user_id);
@@ -233,7 +233,6 @@ class TestController
         // проверка аккаунта на принадлежность пользователю
         try {
             if (DataBase::accounts_get($this->_user_id, $data->account_id) === null) {
-                //$this->_handle_error(403);
                 return $this->_return_app_error(APPERR_ACCOUNT_NOT_OWNED);
             }
             // получение данных по счетчикам
@@ -245,6 +244,34 @@ class TestController
         return $db_data;
     }
 
+    /**
+    * @url POST /indications/list
+    */
+    public function indications_list($data) {
+        // проверка на блок и привилегии
+        if (!$this->_has_user_privs()) {
+            $this->_handle_error(403);
+        }
+        try {
+            $check_fields = ['account_id'];
+            $check_int_fields = ['account_id'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+        } catch (InternalException $e) {
+            $this->_handle_error(400, $e);
+        }
+        try {
+            if (DataBase::accounts_get($this->_user_id, $data->account_id) === null) {
+                return $this->_return_app_error(APPERR_ACCOUNT_NOT_OWNED);
+            }
+            // получение данных по счетчикам
+            $db_data = DataBase::indications_list($this->_user_id, $data->account_id);
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+        
+        return $db_data;
+    }
+    
     /**
     * @url POST /indications/add
     */
@@ -338,8 +365,27 @@ class TestController
     * @url POST /admin/regrequests/count
     */
     public function admin_regrequests_count($data) {
-        $db_data = $this->admin_regrequests_list($data);
-        return count($db_data);
+        if (!$this->_has_operator_privs()) {
+            $this->_handle_error(403);
+        }
+        $filters = null;
+
+        if (is_object($data)) {
+            if (property_exists($data, 'filters') && $data->filters) {
+                $filters = $data->filters;
+                try {
+                    $this->_check_filters($filters);
+                } catch (InternalException $e) {
+                    $this->_handle_error(400, $e);
+                }
+            }
+        }
+        try {
+            $db_data = DataBase::admin_regrequests_count($filters);
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+        return $db_data;
     }
 
     /**
