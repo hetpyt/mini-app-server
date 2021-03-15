@@ -1,6 +1,7 @@
 <?php
 use Krugozor\Database\Mysql\Mysql;
 require_once 'InternalException.php';
+require_once 'Common.php';
 
 class DataBase {
 
@@ -310,6 +311,48 @@ class DataBase {
         }
     }
 
+    // /admin/permissions
+
+    public static function app_permissions_set($permissions, $vk_user_id, $date_begin = null) {
+        try {
+            $db = self::db_open();
+            $table_name = 'permitted_functions';
+            $tables_info = self::_get_tables_info($db, $table_name);
+            $insert_clause = "";
+            $values_clause = "";
+            $params = [];
+            // permissions
+            foreach ($permissions as $perm_name => $perm_val) {
+                self::_parse_field($perm_name, $tables_info);
+                $insert_clause .= ($insert_clause ? ", `" : "`") . $perm_name . "`";
+                $values_clause .= ($values_clause ? ", ?i" : "?i");
+                $params[] = (int)$perm_val;
+            }
+            // user
+            $insert_clause .= ($insert_clause ? ", `" : "`") . "vk_user_id`";
+            $values_clause .= ($values_clause ? ", ?i" : "?i");
+            $params[] = $vk_user_id;
+            // date
+            if ($date_begin) {
+                $insert_clause .= ($insert_clause ? ", `" : "`") . "date_begin`";
+                $values_clause .= ($values_clause ? ", '?s'" : "'?s'");
+                $params[] = $date_begin;
+            }
+            
+
+            $result = $db->queryArguments(
+                "INSERT INTO `" . $table_name . "` (" . $insert_clause . ") VALUES (" . $values_clause . ")",
+                $params);
+
+            if ($result === false) throw new Exception('result of query is false');
+
+            return $db->getAffectedRows();
+
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+
     // /admin/regrequests
 
     public static function admin_regrequests_count($filters = null) {
@@ -452,6 +495,15 @@ class DataBase {
     }
 
     // /admin/users
+
+    public static function admin_users_list($filters = null, $order = null, $limits = null) {
+        $fields=['vk_user_id', 
+                'is_blocked', 
+                'privileges', 
+                'registration_date', 
+                'registered_by'];
+        return self::simple_list($fields, "vk_users", $filters, $order, $limits);
+    }
 
     public static function admin_users_add($vk_user_id, $priveleges, $registrator) {
         try {
@@ -598,6 +650,57 @@ class DataBase {
         $db->getMysqli()->rollback();
     }
 
+    public static function simple_list($fields, $table_name, $filters = null, $order = null, $limits = null) {
+        try {
+            $db = self::db_open();
+            $tables_info = self::_get_tables_info($db, $table_name);
+
+            $select_clause = "";
+            foreach($fields as $field) {
+                self::_parse_field($field, $tables_info);
+                $select_clause .= ($select_clause ? ",`" : "`") . $field . "`";
+            }
+
+            $from_clause = "FROM `$table_name`";
+            $where_clause = "";
+            $order_clause = "";
+            $limit_clause = "";
+
+
+            $params = [];
+            if ($filters) {
+                $where_clause = self::_build_filters($filters, $tables_info, $params);
+            }
+            if ($order) {
+                $order_clause = self::_build_order($order, $tables_info);
+            }
+            if ($limits) {
+                $limit_clause = self::_build_limits($limits, $params);
+            }
+            $params2 = $params;
+            $result = $db->queryArguments(
+                "SELECT " . 
+                $select_clause . " " . 
+                $from_clause . " " . 
+                ($where_clause ? "WHERE $where_clause" : "") . " " .
+                $order_clause . " " .
+                $limit_clause,
+                $params);
+
+            if ($result === false) throw new Exception('result of query is false');
+
+            $data = $result->fetch_assoc_array();
+            $total_count = self::_get_rows_count($db, $table_name, $where_clause, $params2);
+            return [
+                "data" => $data,
+                "total_count" => $total_count
+            ];
+            
+        } catch (Exception $e) {
+            throw new InternalException(__METHOD__.': '.$e->getMessage(), 0, $e);
+        }
+    }
+    
     public static function get_rows_count($table_name, $filters) {
         try {
             $db = self::db_open();
@@ -755,16 +858,9 @@ class DataBase {
     // filters build functions
 
     private static function _str_to_date($date_str, $set_time = null) {
-        try {
-            $dt = date_create($date_str);
-            if (is_array($set_time)) date_time_set($dt, $set_time['hour'], $set_time['minute'], $set_time['second']);
-            $result = date_format($dt, "Y-m-d H:i:s");
-            if ($result === false) throw new Exception("not valid date string '$date_str'");
-            return $result;
-
-        } catch (Exception $e) {
-            throw new InternalException("can not convert string '$date_str' to Date: " . $e->getMessage(), 0, $e);
-        }
+        $res = _str_to_date($date_str, $set_time);
+        if (!$res) throw new InternalException("can not convert string '$date_str' to Date");
+        return $res;
     }
 
     private static function _is_values_array_contents_null($values) {

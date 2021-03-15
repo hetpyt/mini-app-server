@@ -192,7 +192,6 @@ class TestController
     */
     public function privileges_get($data) {
         try {
-            //throw new InternalException('foo');
             $priv_data = DataBase::users_privileges_get($this->_user_id);
             $perm_data = DataBase::app_permissions_get();
         } catch (InternalException $e) {$this->_handle_error(500, $e);}
@@ -203,6 +202,18 @@ class TestController
         ];
     }
 
+    /**
+    * @url POST /apppermissions/get
+    * @url GET /apppermissions/get
+    */
+    public function apppermissions_get($data) {
+        try {
+            $perm_data = DataBase::app_permissions_get();
+        } catch (InternalException $e) {$this->_handle_error(500, $e);}
+
+        return $perm_data;
+    }
+    
     /**
     * @url POST /accounts/list
     * @url GET /accounts/list
@@ -610,8 +621,89 @@ class TestController
         return $db_data;
     }
 
+    // ADMIN ONLY
+    
+    /**
+    * @url POST /admin/apppermissions/set
+    */
+    public function admin_apppermissions_set($data) {
+        if (!$this->_has_admin_privs()) {
+            $this->_handle_error(403);
+        }
 
-    // special methods
+        // check data
+        try {
+            $check_fields = ['indications', 'registration'];
+            $check_int_fields = ['indications', 'registration'];
+            $this->_check_fields($data, $check_fields, $check_int_fields, false);
+
+            $permissions = [];
+            foreach ($check_int_fields as $perm) {
+                $permissions[$perm] = (int)$data->$perm;
+            }
+
+            $date_begin = null;
+            if (property_exists($data, 'date_begin')) {
+                $date_begin = _str_to_date($data->date_begin);
+            }
+        } catch (InternalException $e) {
+            $this->_handle_error(400, $e);
+        }
+
+        try {
+            $db_data = DataBase::app_permissions_set($permissions, $this->_user_id, $date_begin);
+
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+        return $db_data;
+    }
+
+    /**
+    * @url POST /admin/users/list
+    */
+    public function admin_users_list($data) {
+        if (!$this->_has_admin_privs()) {
+            $this->_handle_error(403);
+        }
+        $filters = null;
+        $limits = null;
+        $order = null;
+
+        if (is_object($data)) {
+            if (property_exists($data, 'filters') && $data->filters) {
+                $filters = $data->filters;
+                try {
+                    $this->_check_filters($filters);
+                } catch (InternalException $e) {
+                    $this->_handle_error(400, $e);
+                }
+            }
+
+            if (property_exists($data, 'limits') && $data->limits) {
+                $limits = $data->limits;
+                try {
+                    $this->_check_limits($limits);
+                } catch (InternalException $e) {
+                    $this->_handle_error(400, $e);
+                }
+            }
+
+            if (property_exists($data, 'order') && $data->order) {
+                $order = $data->order;
+            }
+        }
+
+        try {
+            $db_data = DataBase::admin_users_list($filters, $order, $limits);
+
+        } catch (InternalException $e) {
+            $this->_handle_error(500, $e);
+        }
+        return $db_data;
+    }
+
+    // SPECIAL METHODS
 
     public function init() {
         $this->_logger = new Logger('vkappsrvr');
