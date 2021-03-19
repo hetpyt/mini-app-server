@@ -111,8 +111,8 @@ class DataBase {
                     `registration`
                 FROM `permitted_functions` 
                 WHERE `date_begin` <= CURRENT_TIMESTAMP 
-                ORDER BY `date_begin` 
-                DESC LIMIT 1");
+                ORDER BY `date_begin` DESC 
+                LIMIT 1");
 
             if ($result === false) throw new Exception('result of query is false');
 
@@ -149,14 +149,6 @@ class DataBase {
 
             if ($result->getNumRows() != 0) {
                 $data = $result->fetch_assoc_array()[0];
-                if ($data['is_blocked']) $data['privileges'] = '';
-            } else {
-                // незарегистрированный пользователь - по умолчанию USER
-                $data = [
-                    'vk_user_id' => $vk_user_id,
-                    'is_blocked' => 0,
-                    'privileges' => 'USER'
-                ];
             }
             return $data;
 
@@ -1020,16 +1012,16 @@ class DataBase {
     // open db connection
 
     private static function db_open() {
-        global $_Config;
+        global $APP_CONFIG;
         if (self::$_db !== null) return self::$_db;
         $db = Mysql::create(
-            $_Config['db_host'],
-            $_Config['db_user'],
-            $_Config['db_pass'],
-            ($_Config['db_port'] ? $_Config['db_port'] : null)
+            $APP_CONFIG['db_host'],
+            $APP_CONFIG['db_user'],
+            $APP_CONFIG['db_pass'],
+            ($APP_CONFIG['db_port'] ? $APP_CONFIG['db_port'] : null)
         )
-        ->setDatabaseName($_Config['db_name'])
-        ->setCharset($_Config['db_charset']);
+        ->setDatabaseName($APP_CONFIG['db_name'])
+        ->setCharset($APP_CONFIG['db_charset']);
         self::$_db = $db;
 
         return $db;

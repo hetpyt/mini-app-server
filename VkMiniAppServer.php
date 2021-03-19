@@ -3,9 +3,9 @@
 class VkMiniAppServer extends Jacwright\RestServer\RestServer {
 
     public function sendData($data) {
-        global $_Config;
+        global $APP_CONFIG;
         
-        if ($_Config['server_mode'] == 'debug') {
+        if ($APP_CONFIG['server_mode'] == 'debug') {
             // задержка отправки данных для целей отладки
             sleep(1);
         }
