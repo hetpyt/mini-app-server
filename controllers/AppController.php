@@ -1,11 +1,4 @@
 <?php
-use Jacwright\RestServer\RestException;
-require_once 'AbstractController.php';
-require_once 'AppError.php';
-require_once 'Common.php';
-require_once 'InternalException.php';
-require_once 'Logger.php';
-require_once 'DataBase.php';
 
 class AppController extends AbstractController
 {
@@ -19,7 +12,7 @@ class AppController extends AbstractController
         try {
             $this->_check_config($APP_CONFIG);
         } catch (Exception $e) {
-            //echo 'invalid config: ' . $e->getMessage();
+            echo 'invalid config: ' . $e->getMessage();
             $this->_handle_exception(500, $e);
             return;
         }

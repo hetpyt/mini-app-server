@@ -1,11 +1,4 @@
 <?php
-use Jacwright\RestServer\RestException;
-//use Krugozor\Database\Mysql\Mysql;
-require_once 'AppError.php';
-require_once 'Common.php';
-require_once 'InternalException.php';
-require_once 'Logger.php';
-require_once 'DataBase.php';
 
 class AbstractController
 {
