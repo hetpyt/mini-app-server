@@ -1,5 +1,5 @@
 <?php
-$_Config = [
+define('APP_CONFIG', array(
     // db options
     'db_host' => 'localhost',
     'db_port' => '',
@@ -21,5 +21,5 @@ $_Config = [
     // отключает авторизацию через ВК (если true, то токен передавать не нужно)
     // должен быть false в продакшене!
     'no_vk_auth' => false
-];
+));
 ?>
