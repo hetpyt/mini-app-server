@@ -10,7 +10,10 @@ class AbstractController
     // SPECIAL METHODS
 
     public function init() {
-        $this->_logger = new Logger('vkappsrvr');
+        global $APP_CONFIG;
+        if (array_key_exists("enable_logger", $APP_CONFIG) && $APP_CONFIG['enable_logger']) {
+            $this->_logger = new Logger('vkappsrvr', 'log');
+        }
     }
 
     public function authorize() {

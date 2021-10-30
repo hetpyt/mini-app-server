@@ -2,11 +2,12 @@
 
 class Logger {
 
-    private $_log_dir = __DIR__;
+    private $_log_dir = '';
     private $_service_name = '';
 
-    public function __construct($service_name = null, $log_dir = null) {
-        if ($log_dir) $this->_log_dir = $log_dir;
+    public function __construct($service_name = null, $log_dir = '') {
+        global $APP_CONFIG;
+        $this->_log_dir = $APP_CONFIG['__APP_ROOT__'] . '/' . trim($log_dir, '/');
         if ($service_name) $this->_service_name = $service_name;
     }
 

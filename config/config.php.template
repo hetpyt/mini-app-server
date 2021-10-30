@@ -18,8 +18,10 @@ $_Config = [
     'server_token_name' => 'servertokenname_',
     // random phrase to generate auth token for clients
     'server_key' => 'Придумайте случайную строку',
+    // включить логирование на сервере в папку <approot>/log. Папка должна существовать
+    'enable_logger' => true,
     // отключает авторизацию через ВК (если true, то токен передавать не нужно)
-    // должен быть false в продакшене!
+    // должен быть false или удален из конфига в продакшене!
     'no_vk_auth' => false
 ];
 ?>

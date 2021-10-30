@@ -21,11 +21,13 @@ require_once './controllers/AdminController.php';
 
 require_once './VKMiniAppAuthServer.php';
 
+$APP_CONFIG['__APP_ROOT__'] = __DIR__;
+
 $mode = $APP_CONFIG['server_mode'];
 //$server = new RestServer($mode);
 $server = new VkMiniAppServer($mode);
-if ($mode === 'debug') {
-    $server->root = '/api';
+if (array_key_exists('server_root', $APP_CONFIG) && $APP_CONFIG['server_root']) {
+    $server->root = $APP_CONFIG['server_root'];
 }
 $server->setJsonAssoc(false);
 //$server->addClass('TestController');

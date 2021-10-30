@@ -18,7 +18,15 @@ class AppController extends AbstractController
         }
 
         $sign_params = [];
-        if (!$APP_CONFIG['no_vk_auth']) {
+        if (array_key_exists("no_vk_auth", $APP_CONFIG) && $APP_CONFIG['no_vk_auth']) {
+            $sign_params = [
+                'vk_user_id' => $_GET['user_id'],
+                'vk_app_id' => $APP_CONFIG['vk_app_id']
+            ];
+            $status = true;
+            $this->_log("vk auth off! sign_params = " . print_r($sign_params, true));
+
+        } else {
             // аутентификация ВК не отключена
             foreach ($_GET as $name => $value) {
                 if (strpos($name, 'vk_') !== 0) { // Получаем только vk параметры из query
@@ -50,14 +58,6 @@ class AppController extends AbstractController
             $sign = $this->_hash($sign_params_query, $APP_CONFIG['client_secret']);
             // Сравниваем полученную подпись со значением параметра 'sign'
             $status = $sign === $_GET['sign']; 
-        } else {
-            // убрать!!!!
-            $sign_params = [
-                'vk_user_id' => $_GET['user_id'],
-                'vk_app_id' => $APP_CONFIG['vk_app_id']
-            ];
-            $status = true;
-            $this->_log("sign_params = " . print_r($sign_params, true));
         }
 
         if ($status) {
@@ -93,7 +93,6 @@ class AppController extends AbstractController
                 'server_token_name',
             // random phrase to generate auth token for clients
                 'server_key',
-                'no_vk_auth'
             ];
             $check_int_fields = [];
             $this->_check_fields($config, $check_fields, $check_int_fields, false);

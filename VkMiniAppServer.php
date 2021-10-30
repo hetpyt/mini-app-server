@@ -17,6 +17,7 @@ class VkMiniAppServer extends Jacwright\RestServer\RestServer {
         } else {
             $ret['result'] = $data;
         }
+        $ret['api'] = '0.2';
         parent::sendData($ret);
     }
 
