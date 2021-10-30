@@ -10,14 +10,15 @@ class VkMiniAppServer extends Jacwright\RestServer\RestServer {
             sleep(1);
         }
         // обертка данных
-        $ret = [];
-        if (is_array($data) && array_key_exists('error', $data)) {
-            $ret = $data;
-            if (!array_key_exists('result', $ret)) $ret['result'] = false;
-        } else {
-            $ret['result'] = $data;
-        }
-        parent::sendData($ret);
+        // $ret = [];
+        // if (is_array($data) && array_key_exists('error', $data)) {
+        //     $ret = $data;
+        //     if (!array_key_exists('result', $ret)) $ret['result'] = false;
+        // } else {
+        //     $ret['result'] = $data;
+        // }
+        // parent::sendData($ret);
+        parent::sendData($data);
     }
 
 }

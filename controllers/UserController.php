@@ -10,7 +10,7 @@ class UserController extends AbstractController
         try {
             $db_data = DataBase::regrequests_list($this->_user_id);
         } catch (InternalException $e) {$this->_handle_exception(500, $e);}
-        return $db_data;
+        return $this->_return_list_data($db_data);
     }
 
     /**
@@ -59,7 +59,7 @@ class UserController extends AbstractController
 
         } catch (InternalException $e) {$this->_handle_exception(500, $e);}
 
-        return $rows_insert > 0;
+        return $this->_return_data($rows_insert > 0);
     }
 
     /**
@@ -79,7 +79,7 @@ class UserController extends AbstractController
 
         } catch (InternalException $e) {$this->_handle_exception(500, $e);}
         
-        return;
+        return $this->_return_data(true);
     }
 
     /**
@@ -99,7 +99,7 @@ class UserController extends AbstractController
             
         } catch (InternalException $e) {$this->_handle_exception(500, $e);}
 
-        return;
+        return $this->_return_data(true);
     }
 
     /**
@@ -120,10 +120,10 @@ class UserController extends AbstractController
             $perm_data = DataBase::app_permissions_get();
         } catch (InternalException $e) {$this->_handle_exception(500, $e);}
 
-        return [
+        $this->_return_data([
             'user_privileges' => $priv_data,
             'app_permissions' => $perm_data
-        ];
+        ]);
     }
 
     /**
@@ -131,9 +131,7 @@ class UserController extends AbstractController
     * @url GET /apppermissions/get
     */
     public function apppermissions_get($data) {
-        try {
-            $perm_data = DataBase::app_permissions_get();
-        } catch (InternalException $e) {$this->_handle_exception(500, $e);}
+        $perm_data = DataBase::app_permissions_get();
 
         return $perm_data;
     }
@@ -143,14 +141,9 @@ class UserController extends AbstractController
     * @url GET /accounts/list
     */
     public function accounts_list($data) {
-        // проверка на блок и привилегии
-        if (!$this->_has_user_privs()) {
-            $this->_handle_exception(403);
-        }
-        try {
-            $db_data = DataBase::accounts_list($this->_user_id);
-        } catch (InternalException $e) {$this->_handle_exception(500, $e);}
-            
+       
+        $db_data = DataBase::accounts_list($this->query["user_id"]);
+         
         return $db_data;
     }
     
@@ -158,10 +151,6 @@ class UserController extends AbstractController
     * @url POST /meters/list
     */
     public function meters_list($data) {
-        // проверка на блок и привилегии
-        if (!$this->_has_user_privs()) {
-            $this->_handle_exception(403);
-        }
         try {
             $check_fields = ['account_id'];
             $check_int_fields = ['account_id'];
@@ -208,7 +197,7 @@ class UserController extends AbstractController
             $this->_handle_exception(500, $e);
         }
         
-        return $db_data;
+        return $this->_return_list_data($db_data);
     }
     
     /**
@@ -254,7 +243,7 @@ class UserController extends AbstractController
             }
         }
 
-        return true;
+        return $this->_return_data(true);
     }
     
 }

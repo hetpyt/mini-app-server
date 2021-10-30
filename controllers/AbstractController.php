@@ -1,77 +1,32 @@
 <?php
 
+require_once './AppError.php';
+require_once './APIException.php';
+require_once './DataBase.php';
+
 class AbstractController
 {
-    protected $_logger = null;
-    // ид пользователя, полученный через строку запроса
-    protected $_user_id = null;
-    protected $_user_priv = null;
+    // STATIC MEMBERS
+    protected const _API_VERSION = '0.2';
 
+    protected $query = [];
+    protected $data = null;
     // SPECIAL METHODS
 
-    public function init() {
-        $this->_logger = new Logger('vkappsrvr');
+    public function __construct($query, $postData) {
+        $this->query = $query;
+        $this->data = $postData;
+        //echo print_r($this);
     }
 
-    public function authorize() {
-        global $APP_CONFIG;
-        $status = false;
-        $user_id = '';
-        $token = '';
-
-        // получим токен
-        if (array_key_exists('token', $_GET)) {
-            $token = $_GET['token'];
-        }
-        // получим пользователя
-        if (array_key_exists('user_id', $_GET)) {
-            $user_id = $_GET['user_id'];  
-        }
-        if ($user_id && $token) {
-            $expected_token = $this->_get_auth_token($APP_CONFIG, $user_id);
-            if ($status = $expected_token === $token) {
-                $this->_user_id = $user_id;
-                // привилегии пользователя
-                try {
-                    $db_data = DataBase::users_privileges_get($this->_user_id);
-                } catch (InternalException $e) {
-                    return false; //$status;
-                }
-                if ($db_data) $this->_user_priv = $db_data['privileges'];
-                else $this->_user_priv = '';
-            }
-        }
-        return $status;
+    public function init() {
     }
 
     // PROTECTED SECTION
 
     protected function _log($text) {
-        if ($this->_logger) $this->_logger->log($text);
     }
 
-    protected function _return_app_error() {
-        $args = func_get_args();
-
-        $code = array_shift($args);
-        if ($code == null) $code = -999;
-        $message = "";
-
-        if (array_key_exists($code, APPERR_MESSAGES_RU)) {
-            $message = APPERR_MESSAGES_RU[$code];
-        }
-        $index = 0;
-        foreach ($args as $arg) {
-            $message = str_replace('{'.$index.'}', $arg, $message);
-            $index ++;
-        }
-        return [
-            'error' => [
-                'code' => $code,
-                'message' => $message
-            ]
-        ];
-    }
 
     protected function _handle_exception($rest_code = null, $exception = null) {
         if ($rest_code === null) $rest_code = 500;
@@ -84,7 +39,7 @@ class AbstractController
             }
         }
         $this->_log("REST EXCEPTION $rest_code: $message");
-        throw new RestException($rest_code, null);
+        throw new APIException(null, $rest_code);
     }
 
     protected function _has_user_privs() {
@@ -189,22 +144,5 @@ class AbstractController
         }
     }
 
-    protected function _get_auth_token(&$config, $vk_user_id) {
-        return $this->_hash(
-            "" . $vk_user_id . '_' . $config['vk_app_id'] . '_' . $config['server_key'] . '_' . date('Ymd'),
-            $config['client_secret']
-        );
-    }
-
-    protected function _hash($data, $key) {
-        $result = rtrim(
-            strtr(
-                base64_encode(
-                    hash_hmac('sha256', $data, $key, true)
-                ),
-            '+/', '-_'), 
-        '='); 
-        return $result;
-    }
 }
 ?>

@@ -20,6 +20,16 @@ class AppController extends AbstractController
         $sign_params = [];
         if (!$APP_CONFIG['no_vk_auth']) {
             // аутентификация ВК не отключена
+
+            try {
+                $check_fields = ['vk_app_id', 'vk_user_id', 'sign'];
+                $this->_check_fields($_GET, $check_fields, [], false);
+            } catch (Exception $e) {
+                //echo 'invalid request';
+                $this->_handle_exception(403, $e);
+                return;
+            }
+
             foreach ($_GET as $name => $value) {
                 if (strpos($name, 'vk_') !== 0) { // Получаем только vk параметры из query
                     continue;
@@ -27,14 +37,14 @@ class AppController extends AbstractController
                 $sign_params[$name] = $value;
             }
 
-            try {
-                $check_fields = ['vk_app_id', 'vk_user_id'];
-                $this->_check_fields($sign_params, $check_fields, [], true);
-            } catch (Exception $e) {
-                //echo 'invalid request';
-                $this->_handle_exception(403, $e);
-                return;
-            }
+            // try {
+            //     $check_fields = ['vk_app_id', 'vk_user_id'];
+            //     $this->_check_fields($sign_params, $check_fields, [], true);
+            // } catch (Exception $e) {
+            //     //echo 'invalid request';
+            //     $this->_handle_exception(403, $e);
+            //     return;
+            // }
 
             // проверка ид приложения вк
             if ($sign_params['vk_app_id'] != $APP_CONFIG['vk_app_id']) {
